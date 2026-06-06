@@ -13,7 +13,7 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/theme"
 )
 
 // drawerDuration is how long the open/close animation takes end to end.

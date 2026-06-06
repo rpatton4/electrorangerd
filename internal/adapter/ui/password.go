@@ -19,10 +19,10 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
-	"github.com/InfiniteSkye/electrorangerd/internal/domain"
-	"github.com/InfiniteSkye/electrorangerd/internal/errs"
-	"github.com/InfiniteSkye/electrorangerd/internal/port"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/theme"
+	"github.com/rpatton4/electrorangerd/internal/domain"
+	"github.com/rpatton4/electrorangerd/internal/errs"
+	"github.com/rpatton4/electrorangerd/internal/port"
 )
 
 // passwordPhase tracks which step of the master-password flow the user is on.

@@ -18,11 +18,11 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/canvas"
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/dialog"
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
-	"github.com/InfiniteSkye/electrorangerd/internal/domain"
-	"github.com/InfiniteSkye/electrorangerd/internal/port"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/canvas"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/dialog"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/theme"
+	"github.com/rpatton4/electrorangerd/internal/domain"
+	"github.com/rpatton4/electrorangerd/internal/port"
 )
 
 const (

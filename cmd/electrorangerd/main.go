@@ -7,15 +7,15 @@ import (
 
 	pref "gioui.org/x/pref/theme"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/config"
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/flyway"
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/postgres"
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/projectfile"
-	ui "github.com/InfiniteSkye/electrorangerd/internal/adapter/ui"
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
-	vaultadapter "github.com/InfiniteSkye/electrorangerd/internal/adapter/vault"
-	"github.com/InfiniteSkye/electrorangerd/internal/core"
-	"github.com/InfiniteSkye/electrorangerd/internal/domain"
+	"github.com/rpatton4/electrorangerd/internal/adapter/config"
+	"github.com/rpatton4/electrorangerd/internal/adapter/flyway"
+	"github.com/rpatton4/electrorangerd/internal/adapter/postgres"
+	"github.com/rpatton4/electrorangerd/internal/adapter/projectfile"
+	ui "github.com/rpatton4/electrorangerd/internal/adapter/ui"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/theme"
+	vaultadapter "github.com/rpatton4/electrorangerd/internal/adapter/vault"
+	"github.com/rpatton4/electrorangerd/internal/core"
+	"github.com/rpatton4/electrorangerd/internal/domain"
 )
 
 func main() {

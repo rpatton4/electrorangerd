@@ -1,6 +1,6 @@
 package diagram
 
-import "github.com/InfiniteSkye/electrorangerd/internal/domain"
+import "github.com/rpatton4/electrorangerd/internal/domain"
 
 // Box is the bounding rectangle of a single entity node on the canvas. It
 // pairs the entity's top-left placement with the box's dimensions. The

@@ -6,8 +6,8 @@ import (
 	"gioui.org/layout"
 	"gioui.org/unit"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/infomenu"
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/infomenu"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/theme"
 )
 
 // welcomeView is the initial post-unlock chooser. It displays the

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/core"
-	"github.com/InfiniteSkye/electrorangerd/internal/domain"
-	"github.com/InfiniteSkye/electrorangerd/internal/errs"
+	"github.com/rpatton4/electrorangerd/internal/core"
+	"github.com/rpatton4/electrorangerd/internal/domain"
+	"github.com/rpatton4/electrorangerd/internal/errs"
 )
 
 type store struct {

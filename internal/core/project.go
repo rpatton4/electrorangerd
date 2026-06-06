@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/domain"
-	"github.com/InfiniteSkye/electrorangerd/internal/errs"
-	"github.com/InfiniteSkye/electrorangerd/internal/port"
+	"github.com/rpatton4/electrorangerd/internal/domain"
+	"github.com/rpatton4/electrorangerd/internal/errs"
+	"github.com/rpatton4/electrorangerd/internal/port"
 )
 
 // ProjectStore loads and saves Project documents from on-disk storage.

@@ -14,7 +14,7 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget/material"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/domain"
+	"github.com/rpatton4/electrorangerd/internal/domain"
 )
 
 // EntityPalette is the colour set Canvas.Entity paints with. The caller

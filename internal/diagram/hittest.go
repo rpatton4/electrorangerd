@@ -1,6 +1,6 @@
 package diagram
 
-import "github.com/InfiniteSkye/electrorangerd/internal/domain"
+import "github.com/rpatton4/electrorangerd/internal/domain"
 
 // Hit tests the point (x, y) against boxes and returns the EntityID of the
 // first entity whose bounding box contains the point. If no entity is hit

@@ -4,7 +4,7 @@
 
 A Go desktop tool for creating and managing Entity Relationship Diagrams (ERDs). Single-developer, private GitHub repo. Reads/writes PostgreSQL via pgx (forward/reverse engineering), reads/writes Flyway migration files, and detects drift between any two schema snapshots (project file ↔ live PG ↔ Flyway replay). UI is GIOUI (immediate-mode desktop).
 
-- **Module**: `github.com/InfiniteSkye/electrorangerd`
+- **Module**: `github.com/rpatton4/electrorangerd`
 - **Repo root**: `/Users/rpatton/work/repositories/erd_workroot/main/` (worktree-style — branch name matches directory)
 - **`go.work`**: lives at `/Users/rpatton/work/repositories/erd_workroot/go.work` for IDE indexing — **DO NOT move it inside `main/`**
 - **Go**: 1.26.3

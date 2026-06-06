@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/core"
-	"github.com/InfiniteSkye/electrorangerd/internal/domain"
-	"github.com/InfiniteSkye/electrorangerd/internal/errs"
+	"github.com/rpatton4/electrorangerd/internal/core"
+	"github.com/rpatton4/electrorangerd/internal/domain"
+	"github.com/rpatton4/electrorangerd/internal/errs"
 )
 
 // memStore is an in-memory EncryptedStore for tests. It mimics the on-disk

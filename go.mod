@@ -1,4 +1,4 @@
-module github.com/InfiniteSkye/electrorangerd
+module github.com/rpatton4/electrorangerd
 
 go 1.26.3
 

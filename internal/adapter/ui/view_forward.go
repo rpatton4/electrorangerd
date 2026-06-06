@@ -5,9 +5,9 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget/material"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/dialog"
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
-	"github.com/InfiniteSkye/electrorangerd/internal/port"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/dialog"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/theme"
+	"github.com/rpatton4/electrorangerd/internal/port"
 )
 
 // forwardView is the per-mode view for ModeForward (Forward Mode). It owns

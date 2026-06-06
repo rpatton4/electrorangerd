@@ -9,7 +9,7 @@ import (
 
 	"gioui.org/op/paint"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/infomenu"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/infomenu"
 )
 
 //go:embed vault_door.png

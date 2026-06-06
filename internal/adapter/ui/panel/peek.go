@@ -5,8 +5,8 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget/material"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
-	"github.com/InfiniteSkye/electrorangerd/internal/port"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/theme"
+	"github.com/rpatton4/electrorangerd/internal/port"
 )
 
 // Peek is the slide-out side panel that shows a single dictionary entry for

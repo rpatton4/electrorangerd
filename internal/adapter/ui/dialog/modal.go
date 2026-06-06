@@ -12,7 +12,7 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/theme"
 )
 
 // Modal is a centred dialog with a title row, a caller-supplied body, and

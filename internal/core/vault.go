@@ -12,9 +12,9 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/domain"
-	"github.com/InfiniteSkye/electrorangerd/internal/errs"
-	"github.com/InfiniteSkye/electrorangerd/internal/port"
+	"github.com/rpatton4/electrorangerd/internal/domain"
+	"github.com/rpatton4/electrorangerd/internal/errs"
+	"github.com/rpatton4/electrorangerd/internal/port"
 )
 
 // EncryptedStore reads and writes the on-disk encrypted vault blob.

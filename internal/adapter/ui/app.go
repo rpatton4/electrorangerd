@@ -14,10 +14,10 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/infomenu"
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/panel"
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
-	"github.com/InfiniteSkye/electrorangerd/internal/port"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/infomenu"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/panel"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/theme"
+	"github.com/rpatton4/electrorangerd/internal/port"
 )
 
 // appName is the base OS window title. The window title also carries a

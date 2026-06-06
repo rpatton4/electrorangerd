@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/domain"
-	"github.com/InfiniteSkye/electrorangerd/internal/errs"
+	"github.com/rpatton4/electrorangerd/internal/domain"
+	"github.com/rpatton4/electrorangerd/internal/errs"
 )
 
 func newTestEditor() *diagramEditorService {

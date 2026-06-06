@@ -7,8 +7,8 @@ import (
 	"gioui.org/x/markdown"
 	"gioui.org/x/richtext"
 
-	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
-	"github.com/InfiniteSkye/electrorangerd/internal/port"
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/theme"
+	"github.com/rpatton4/electrorangerd/internal/port"
 )
 
 const sampleMarkdown = `# Customer entity
