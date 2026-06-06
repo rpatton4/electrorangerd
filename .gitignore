@@ -1,6 +1,9 @@
-# binaries
-/electrorangerd
+# binaries / executables
+electrorangerd
+electrorangerd-*
 /bin/
+*.exe
+*.test
 
 # IDE
 .idea/
