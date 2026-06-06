@@ -22,7 +22,7 @@ func main() {
 		logger.Error("postgres conn init", "err", err)
 		os.Exit(1)
 	}
-	defer pgConn.Close()
+	defer func() { _ = pgConn.Close() }()
 
 	pgIntrospector := postgres.NewIntrospector(pgConn, logger)
 	pgApplier := postgres.NewApplier(pgConn, logger)

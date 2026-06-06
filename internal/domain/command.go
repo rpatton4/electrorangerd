@@ -4,7 +4,7 @@ package domain
 type CommandKind int
 
 const (
-	CmdAddEntity          CommandKind = iota
+	CmdAddEntity CommandKind = iota
 	CmdRemoveEntity
 	CmdAddAttribute
 	CmdRemoveAttribute

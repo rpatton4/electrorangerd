@@ -4,7 +4,7 @@ package domain
 type IssueSeverity int
 
 const (
-	SeverityInfo    IssueSeverity = iota
+	SeverityInfo IssueSeverity = iota
 	SeverityWarning
 	SeverityError
 )

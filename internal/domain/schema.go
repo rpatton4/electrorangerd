@@ -6,7 +6,7 @@ package domain
 type ConstraintKind int
 
 const (
-	ConstraintCheck   ConstraintKind = iota
+	ConstraintCheck ConstraintKind = iota
 	ConstraintUnique
 	ConstraintNotNull
 )
