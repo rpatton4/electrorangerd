@@ -1,4 +1,4 @@
-package ui
+package infomenu
 
 import (
 	"bytes"
@@ -12,15 +12,29 @@ import (
 	"gioui.org/op/paint"
 )
 
+//go:embed nav_button.png
+var navButtonPNG []byte
+
 //go:embed menu_button.png
 var menuButtonPNG []byte
 
-// decodeMenuButton decodes the embedded PNG and applies an inscribed-circle
-// alpha mask: every pixel outside the inscribed circle is punched to
-// alpha=0, with a 1-pixel anti-aliased edge band so the boundary reads
-// smooth rather than jagged. This works around the source PNG having
-// opaque grey corners that no clip-at-render would have to compensate
-// for. Returns a zero-value op on decode failure (paints nothing).
+// decodeNavButton decodes the embedded chrome PNG used as the small
+// circular nav button. Returns a zero-value op on failure (paints
+// nothing) and logs the error.
+func decodeNavButton(log *slog.Logger) paint.ImageOp {
+	img, _, err := image.Decode(bytes.NewReader(navButtonPNG))
+	if err != nil {
+		log.Error("decode nav button", "err", err)
+		return paint.ImageOp{}
+	}
+	return paint.NewImageOp(img)
+}
+
+// decodeMenuButton decodes the embedded PNG used as the larger info
+// menu wheel and applies an inscribed-circle alpha mask (1px
+// anti-aliased edge) so renderers can draw it without a runtime
+// clip — Gemini-generated PNGs have opaque grey corners, this masks
+// them out at decode time.
 func decodeMenuButton(log *slog.Logger) paint.ImageOp {
 	src, _, err := image.Decode(bytes.NewReader(menuButtonPNG))
 	if err != nil {
@@ -44,7 +58,7 @@ func decodeMenuButton(log *slog.Logger) paint.ImageOp {
 			dy := float64(y) - cy + 0.5
 			fade := r - math.Sqrt(dx*dx+dy*dy)
 			if fade <= -0.5 {
-				continue // outside: stays transparent
+				continue
 			}
 			c := nsrc.NRGBAAt(b.Min.X+x, b.Min.Y+y)
 			if fade < 0.5 {

@@ -5,27 +5,20 @@ import (
 	"image"
 	"image/color"
 	"log/slog"
-	"math"
 	"os"
-	"time"
 
 	"gioui.org/app"
-	"gioui.org/f32"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
-	"gioui.org/widget"
 
+	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/infomenu"
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/panel"
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
 )
-
-// menuOpenDuration is how long the menu-wheel open animation takes. Over
-// this span the wheel scales from 1/8 to full size and rotates 360°.
-const menuOpenDuration = 500 * time.Millisecond
 
 // screenType distinguishes the top-level UI surfaces inside the app shell.
 // The master-password gate runs unconditionally before either screen — it
@@ -69,16 +62,10 @@ type App struct {
 	// Mode state.
 	mode Mode
 
-	// Nav state — single circular button at the mode-shell bottom. Click
-	// toggles the menu overlay (the larger chrome dial with the four mode
-	// labels) which floats centred on top of the mode shell.
-	navClick     widget.Clickable
-	navButton    paint.ImageOp
-	menuOpen     bool
-	menuOpenedAt time.Time
-	menuClick    widget.Clickable
-	menuButton   paint.ImageOp
-	scrimClick   widget.Clickable
+	// Primary navigation — the reusable info-menu element (nav button
+	// at screen-bottom + overlay wheel). Constructed in initViews so
+	// it shares its lifetime with the rest of the per-frame views.
+	infoMenu *infomenu.InfoMenu
 
 	// Per-mode views (built after the password gate clears).
 	welcomeView    *welcomeView
@@ -194,12 +181,10 @@ func (a *App) frame(gtx layout.Context) {
 				)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.layoutModeNav(gtx)
+				return a.infoMenu.LayoutInfoArea(gtx)
 			}),
 		)
-		if a.menuOpen {
-			a.layoutMenuOverlay(gtx)
-		}
+		a.infoMenu.LayoutOverlay(gtx)
 	}
 }
 
@@ -208,12 +193,8 @@ func (a *App) frame(gtx layout.Context) {
 // a.password serves as the "first frame" sentinel.
 func (a *App) initViews() {
 	a.password = newPasswordView(a.vault, a.log)
-	a.navButton = decodeNavButton(a.log)
-	a.menuButton = decodeMenuButton(a.log)
-	a.welcomeView = newWelcomeView(func(m Mode) {
-		a.mode = m
-		a.screen = screenMode
-	})
+	a.infoMenu = infomenu.New(a.log)
+	a.welcomeView = newWelcomeView(a.infoMenu)
 	a.diagramView = newDiagramView(a.diagramHistory)
 	a.forwardView = newForwardView(a.forward)
 	a.dictionaryView = newDictionaryView(a.dictionary, a.dictionaryHistory, a.theme.Material)
@@ -225,129 +206,6 @@ func (a *App) fillBackground(gtx layout.Context, c color.NRGBA) {
 	paint.ColorOp{Color: c}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	rect.Pop()
-}
-
-// layoutModeNav draws the bottom navigation bar — a single circular button
-// rendered from the embedded chrome PNG, centred horizontally. Clicking
-// it opens the menu overlay. Dismiss is handled exclusively by the
-// scrim's click area (see layoutMenuOverlay); the nav button never
-// closes the menu, so there's no double-toggle race between the two
-// handlers on a single click.
-func (a *App) layoutModeNav(gtx layout.Context) layout.Dimensions {
-	if a.menuOpen {
-		// While menu is up, drain any nav clicks that were captured
-		// before the slot stopped registering, so they don't pile up.
-		for a.navClick.Clicked(gtx) {
-		}
-	} else if a.navClick.Clicked(gtx) {
-		a.menuOpen = true
-		a.menuOpenedAt = gtx.Now
-	}
-
-	return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			sz := gtx.Dp(unit.Dp(56))
-			size := image.Pt(sz, sz)
-
-			// While the menu wheel is up the chrome button hides AND
-			// stops registering its click area, so the scrim above is
-			// the sole receiver of taps in the bottom-centre region.
-			// The 56dp slot is still reserved so the layout doesn't
-			// shift between open and closed states.
-			if a.menuOpen {
-				return layout.Dimensions{Size: size}
-			}
-
-			return a.navClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				gtx.Constraints = layout.Exact(size)
-				defer clip.Ellipse{Max: size}.Push(gtx.Ops).Pop()
-				return widget.Image{
-					Src:      a.navButton,
-					Fit:      widget.Cover,
-					Position: layout.Center,
-				}.Layout(gtx)
-			})
-		})
-	})
-}
-
-// layoutMenuOverlay renders the larger chrome dial (with the four mode
-// labels around the rim) floating centred on top of the mode shell. On
-// open it scales from 1/8 to full size while rotating 360°; a near-black
-// scrim fades in over the same span, muting the underlying UI so it
-// stays visible but barely. The click is registered but currently does
-// nothing; tap the bottom slot to dismiss.
-func (a *App) layoutMenuOverlay(gtx layout.Context) layout.Dimensions {
-	_ = a.menuClick.Clicked(gtx) // consume; menu does nothing yet
-	if a.scrimClick.Clicked(gtx) {
-		// Close the menu now AND skip painting the overlay this frame —
-		// otherwise this frame still commits the scrim + wheel ops and
-		// the user only sees the close on the next frame (which won't
-		// fire until they click again). The invalidate makes the harness
-		// schedule a follow-up frame so the layout below (nav button
-		// re-registering its click area) settles properly.
-		a.menuOpen = false
-		gtx.Execute(op.InvalidateCmd{})
-		return layout.Dimensions{}
-	}
-
-	elapsed := gtx.Now.Sub(a.menuOpenedAt)
-	progress := float32(elapsed) / float32(menuOpenDuration)
-	if progress >= 1 {
-		progress = 1
-	} else if progress < 0 {
-		progress = 0
-	}
-	if progress < 1 {
-		gtx.Execute(op.InvalidateCmd{})
-	}
-
-	// Scrim — semi-opaque near-black across the whole window so the
-	// mode shell behind reads as muted. Alpha fades in with the open
-	// animation rather than snapping on, to match the wheel's spin-in.
-	// Wrapped in scrimClick so any tap on it (i.e. outside the wheel,
-	// which sits on top with its own clickable) dismisses the menu.
-	a.scrimClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		scrim := color.NRGBA{A: uint8(float32(0xD8) * progress)}
-		scrimRect := clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops)
-		paint.ColorOp{Color: scrim}.Add(gtx.Ops)
-		paint.PaintOp{}.Add(gtx.Ops)
-		scrimRect.Pop()
-		return layout.Dimensions{Size: gtx.Constraints.Max}
-	})
-
-	scale := 0.125 + 0.875*progress
-	rotation := progress * 2 * float32(math.Pi)
-
-	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		sz := gtx.Dp(unit.Dp(320))
-		size := image.Pt(sz, sz)
-
-		// Restrict the menu's click area to the inscribed circle. Without
-		// this, the four corners of the 320dp bounding square (visually
-		// transparent — the geometric alpha mask makes them invisible)
-		// would still capture taps as menu clicks (a no-op), preventing
-		// the scrim from dismissing on what the user perceives as a tap
-		// outside the wheel. Clip pushed before menuClick.Layout so its
-		// gesture.Click is registered inside the elliptical clip.
-		defer clip.Ellipse{Max: size}.Push(gtx.Ops).Pop()
-
-		return a.menuClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints = layout.Exact(size)
-
-			centre := f32.Pt(float32(sz)/2, float32(sz)/2)
-			affine := f32.Affine2D{}.
-				Rotate(centre, rotation).
-				Scale(centre, f32.Pt(scale, scale))
-			defer op.Affine(affine).Push(gtx.Ops).Pop()
-
-			return widget.Image{
-				Src:      a.menuButton,
-				Fit:      widget.Cover,
-				Position: layout.Center,
-			}.Layout(gtx)
-		})
-	})
 }
 
 func (a *App) layoutCurrentView(gtx layout.Context) layout.Dimensions {

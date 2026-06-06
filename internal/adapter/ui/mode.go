@@ -34,11 +34,3 @@ func (m Mode) Label() string {
 		return "Unknown"
 	}
 }
-
-// allModes is the canonical ordering used by the mode navigator.
-var allModes = [...]Mode{
-	ModeDiagram,
-	ModeForward,
-	ModeDictionary,
-	ModeReverse,
-}
