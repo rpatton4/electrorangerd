@@ -34,3 +34,21 @@ func (m Mode) Label() string {
 		return "Unknown"
 	}
 }
+
+// String returns the canonical long-form mode name ("Diagram Mode", etc.),
+// suitable for window-title suffixes and other places that name the mode
+// outside the nav button. Implements fmt.Stringer.
+func (m Mode) String() string {
+	switch m {
+	case ModeDiagram:
+		return "Diagram Mode"
+	case ModeForward:
+		return "Forward Mode"
+	case ModeDictionary:
+		return "Dictionary Mode"
+	case ModeReverse:
+		return "Reverse Mode"
+	default:
+		return "Unknown Mode"
+	}
+}

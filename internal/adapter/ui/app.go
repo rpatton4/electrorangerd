@@ -20,6 +20,10 @@ import (
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
 )
 
+// appName is the base OS window title. The window title also carries a
+// mode suffix while the user is on the mode shell — see App.windowTitle.
+const appName = "ElectroRangerD"
+
 // screenType distinguishes the top-level UI surfaces inside the app shell.
 // The master-password gate runs unconditionally before either screen — it
 // is a precondition, not a screen state. After unlock the welcome chooser
@@ -120,7 +124,7 @@ func (a *App) Run() error {
 	go func() {
 		w := new(app.Window)
 		w.Option(
-			app.Title("ElectroRangerD"),
+			app.Title(appName),
 			app.Size(unit.Dp(1024), unit.Dp(768)),
 		)
 		if err := a.loop(w); err != nil {
@@ -142,6 +146,7 @@ func (a *App) loop(w *app.Window) error {
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
+			w.Option(app.Title(a.windowTitle()))
 			a.frame(gtx)
 			e.Frame(gtx.Ops)
 		}
@@ -223,6 +228,16 @@ func (a *App) layoutCurrentView(gtx layout.Context) layout.Dimensions {
 		return a.reverseView.Layout(gtx, a.theme)
 	}
 	return layout.Dimensions{}
+}
+
+// windowTitle returns the OS window title to apply this frame. On the
+// welcome screen it is the bare app name; on the mode shell it carries
+// a " - <Mode> Mode" suffix so the title bar reflects the active mode.
+func (a *App) windowTitle() string {
+	if a.screen == screenMode {
+		return appName + " - " + a.mode.String()
+	}
+	return appName
 }
 
 // sectorToMode maps an infomenu.Sector (the wheel's ring-section
