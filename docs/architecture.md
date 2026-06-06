@@ -71,3 +71,23 @@ Errors are wrapped with `fmt.Errorf("component: %w", err)` at every boundary so 
 ## Future: Multiple SQL Dialects
 
 The current outbound interfaces in `core` (`PostgresIntrospector`, `PostgresApplier`) are PostgreSQL-specific. When a second database engine is needed, these interfaces generalise into a `SQLDialect` abstraction and `adapter/postgres` becomes one concrete implementation alongside (for example) `adapter/mysql`. The inbound port interfaces and all core services remain unchanged.
+
+## UI rendering: 2.5D in Gio (decision record)
+
+**Decision**: render the 3D-styled look with 2.5D techniques inside Gio's existing 2D pipeline. No GL bolt-on. No custom 3D engine.
+
+**Context**: user requested entities at angles, angled connectors, drawer-style buttons — "not a game just a UI."
+
+**Alternatives considered**:
+
+1. *Gio + OpenGL ES bolt-on* — embed `gioui.org/example/opengl` pattern for a true 3D canvas. Rejected: 3–6 months solo, ANGLE deployment cost on macOS/Windows, Wayland gap on Linux.
+2. *Full custom build* on g3n / raylib-go / raw `go-gl/gl`. Rejected: no Go 3D foundation provides desktop-grade widget machinery; menus / dialogs / file-pickers all re-invented from scratch.
+3. *2.5D in Gio* (chosen) — `f32.Affine2D` shear + layered shadows + clipped translate-Y for drawers. Pattern used by Figma, Notion, Linear, Affinity Designer. ~95% of the "feels 3D" impression at minimal cost.
+
+**Mechanism**: axonometric / cabinet projection (parallel projection, not perspective). Entity boxes are sheared at render time in `internal/adapter/ui/canvas/`. Connectors are Bezier paths in sheared space. Drawer buttons are clipped translate-Y animations.
+
+**Gotcha**: Gio rasterizes glyphs upright; sheared text looks broken. Mitigation — un-shear before drawing entity titles; shear only the box chrome.
+
+**Coordinate-space discipline**: `internal/diagram/` is logical 2D only. `internal/adapter/ui/` owns the presentation shear. Mouse interaction inverts the shear before calling `diagram.Hit`.
+
+**When to revisit**: if a 2.5D prototype demonstrably fails to satisfy the user's "3D look" requirement (e.g., perspective foreshortening becomes a hard feature ask), reopen this decision with a fresh architect review before any GL code lands.

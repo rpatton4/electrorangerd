@@ -64,6 +64,32 @@ adapter/  ──►  core/  ──►  port/
 - **No backwards-compat shims.** Private code — break it, fix it, move forward.
 - **Tests** land per-package with real fixtures (`testdata/`) when the corresponding logic is implemented. Scaffolding currently has none.
 
+## UI rendering approach: 2.5D in Gio
+
+ElectroRangerD renders with a 3D-styled look — entities at angles, angled connectors, drawer-style buttons — using **2.5D techniques in Gio's existing 2D pipeline**. No OpenGL bolt-on. No custom 3D engine.
+
+Mechanism (Figma / Notion / Linear pattern):
+
+- **Axonometric / cabinet projection** for entity boxes via `f32.Affine2D` shear. Parallel projection only — no perspective, no z-buffer.
+- **Layered shadows** under entity boxes for depth cueing.
+- **Sheared Bezier paths** for angled connectors between entities.
+- **Clipped translate-Y animations** for drawer-style buttons. No 3D involved in drawers.
+
+### Hard rule: keep title text upright
+
+Gio rasterizes glyphs upright; text rendered through a sheared transform looks like cal up close. **Un-shear before drawing entity titles** — only the box chrome carries the shear. Figma uses exactly this pattern.
+
+### Coordinate-space discipline
+
+- `internal/diagram/` holds **logical 2D coordinates** of ERD entities and edges. NEVER apply axonometric shear here.
+- `internal/adapter/ui/` applies the shear at render time. The shear matrix and its inverse (for hit-testing) live with the canvas code in `adapter/ui/canvas/`.
+- Mouse coordinates flow: pointer event → inverse-shear → logical 2D space → `diagram.Hit(...)` returns the entity name.
+
+### Rejected alternatives (do not reopen without an architect review)
+
+- **Gio + OpenGL ES bolt-on** for a true 3D canvas: 3–6 months solo work, ANGLE deployment headache on macOS/Windows, Wayland gap on Linux. Not justified for an ERD tool.
+- **Full custom build (g3n / raylib-go / raw OpenGL)**: no Go 3D foundation gives a desktop-grade ERD app faster than Gio gives a desktop-grade 2D one. UI widgets get re-invented from scratch.
+
 ## Boundary verification
 
 Run these from `main/` after any structural change. All four must return empty:
