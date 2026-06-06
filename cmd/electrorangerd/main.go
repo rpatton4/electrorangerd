@@ -36,9 +36,11 @@ func main() {
 	drift := core.NewDriftDetector(logger)
 	forward := core.NewForwardService(pgApplier, flyWriter, validator, logger)
 	reverse := core.NewReverseService(pgIntrospector, flyReader, logger)
-	project := core.NewProjectService(projStore, cfgStore, logger)
+	// nil DictionaryStore: real on-disk persistence lands when adapter/dictionaryfile is added.
+	project := core.NewProjectService(projStore, nil, cfgStore, logger)
+	dictionarySvc := core.NewDictionaryService(nil, logger)
 
-	application := ui.NewApp(forward, reverse, drift, project, validator, history, logger)
+	application := ui.NewApp(forward, reverse, drift, project, validator, history, dictionarySvc, logger)
 	if err := application.Run(); err != nil {
 		logger.Error("application run", "err", err)
 		os.Exit(1)

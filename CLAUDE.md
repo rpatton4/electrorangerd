@@ -11,6 +11,39 @@ A Go desktop tool for creating and managing Entity Relationship Diagrams (ERDs).
 - **Key deps**: `gioui.org` v0.10.0, `github.com/jackc/pgx/v5` v5.9.2
 - **License**: Proprietary / All Rights Reserved (InfiniteSkye)
 
+## Application modes and scope
+
+ElectroRangerD operates in four primary modes, presented as a strict mode switch with a peek panel from any mode (the peek panel can show a slice of another mode for the currently-selected schema element, but the full mode UI never overlaps).
+
+| # | Mode | Purpose | Implementation plan |
+|---|------|---------|---------------------|
+| 1 | Diagram edit | Create and maintain ER diagrams from scratch, no reverse-engineering | Plan C |
+| 2 | Forward engineering | Push diagrams into PostgreSQL databases (multi-schema, multi-DB via Flyway) | Plan C |
+| 3 | Data dictionary | Create and maintain dictionary information for each entity, attribute, and relationship | Plan C |
+| 4 | Reverse engineering | Build an ER diagram from an existing data source with multiple schemas | Plan C |
+
+### Data model hierarchy
+
+```
+Project
+└── Database [1..N]            // ProfileName references a vault-encrypted connection (Plan B)
+    └── Schema [1..N]          // PostgreSQL schema namespace
+        └── Entity
+            ├── Attribute
+            ├── Index
+            └── Constraint
+Project.Relationships [...]     // project-level; can cross schemas AND databases
+Dictionary (separate document)  // sibling of Project, keyed by DictionaryRef
+```
+
+### Three-plan sequence
+
+The scope expansion is delivered as three sequenced plans, NOT one mega-plan:
+
+- **Plan A (foundation, current)** — domain reshape, port signature updates, doc lock-ins. No business logic, no adapter changes beyond signature matching.
+- **Plan B (vault, next)** — `Vault` inbound port + `adapter/vault` (Argon2id + AES-GCM + per-OS build-tagged keychain integration in `os_darwin.go` / `os_windows.go` / `os_linux.go`). `ConnectionProfile.DSN` becomes an opaque encrypted blob.
+- **Plan C (UI shell, after B)** — per-mode UI in `adapter/ui/`: 4-mode state machine, peek panel, mode-local `History` stack, markdown rendering via `gioui.org/x/markdown`, 2.5D canvas, drawer-style buttons.
+
 ## Architecture: hexagonal (ports & adapters)
 
 ```
@@ -49,7 +82,7 @@ adapter/  ──►  core/  ──►  port/
 | Pure canvas math (layout, hit-testing, edge routing) | `internal/diagram/` | Must NOT import Gio — keeps it unit-testable |
 | Anything Gio-specific (rendering, events, widgets) | `internal/adapter/ui/` | Flat until ~8 files, then split by concern (`canvas/`, `panel/`, `dialog/`) — NEVER by Gio primitive |
 | Logging | Inject `*slog.Logger` via constructor — NEVER global, NEVER package-level | |
-| Project JSON shape | `internal/adapter/projectfile/` consumes `domain.Schema` | |
+| Project JSON shape | `internal/adapter/projectfile/` consumes `domain.Project` | |
 | User pref / connection profile | `internal/domain/config.go` types + `internal/adapter/config/` IO | |
 | Composition wiring | `cmd/electrorangerd/main.go` only | Only place allowed to import concrete adapters + core simultaneously |
 
@@ -57,12 +90,18 @@ adapter/  ──►  core/  ──►  port/
 
 - **Logging**: stdlib `log/slog`, injected as `*slog.Logger`. Never global. Never package-level. Never `slog.Default()` outside `main()`.
 - **Errors**: wrap with `fmt.Errorf("<context>: %w", errs.ErrXxx)`. Match with `errors.Is`.
-- **`domain.Schema` discipline**: NO mutating methods on domain types. Services produce *new* schemas; never mutate in place. Value types over pointer fields. This is the architect's loudest warning — Schema becomes a god-struct if we let it.
+- **`domain.Project` discipline**: NO mutating methods on domain types. Services produce *new* Projects; never mutate in place. Value types over pointer fields. This is the architect's loudest warning — Project (the top-level container, multi-DB + multi-schema + relationships + dictionary refs) becomes a god-struct if we let it.
 - **Comments**: default to none. Add only when WHY is non-obvious (hidden constraint, subtle invariant, workaround). Names explain WHAT.
 - **No `util/`, `common/`, `helpers/` packages.** Reaching for one means avoiding a real domain decision.
 - **No package-level mutable state.** No `var Global = ...`.
 - **No backwards-compat shims.** Private code — break it, fix it, move forward.
 - **Tests** land per-package with real fixtures (`testdata/`) when the corresponding logic is implemented. Scaffolding currently has none.
+- **Test policy**: unit tests are written alongside or prior to logic, and **only** test true user-facing functionality — there are NO tests for the sake of coverage metrics. Tests live next to code as `*_test.go` files, are table-driven, and exercise inbound ports (the user-facing API surface). NO central `internal/integration/` package — that becomes a dumping ground and obscures ownership.
+- **Multithreading**: `core/` services own their goroutines and decide internally whether to fan out (e.g. reverse-engineering parallelizes per-schema introspection). The UI dispatches work via channels and marshals results back via `op.InvalidateOp`. `context.Context` propagates UI → services for cancellation. **NO goroutines in `domain/` or `port/`.**
+- **Markdown**: in-app documentation is authored in Markdown and rendered via `gioui.org/x/markdown` inside `adapter/ui/`. There is NO `MarkdownRenderer` port — only the UI consumes markdown rendering. Domain text fields like `DictionaryEntry.Description` are plain `string` with a markdown content convention.
+- **Flyway constraint**: the free Community Edition is the only target; there is NO `undo` command. The tool emits ONLY `V_` (versioned) and `R_` (repeatable) migration files. "Undoing" a change means emitting a forward "compensation" migration. `MigrationFile.Down` is reserved for our own compensation-migration emission and is never executed by Flyway.
+- **Notation**: crow's foot ONLY. Each Relationship endpoint carries an independent `Cardinality` (One / Many) and `Optionality` (Required / Optional), encoded as two separate enums so renderers and forward-engineering can read them independently (forward-eng cares about NOT NULL independently from UNIQUE).
+- **Provenance over Inferred bool**: `Relationship.Provenance` records `Source` (Declared / Inferred / Manual), `Confidence` (0..255), and a human-readable `Reason`. Reverse-engineering surfaces the reason in the review UI so users know why a heuristic fired.
 
 ## UI rendering approach: 2.5D in Gio
 
@@ -109,11 +148,16 @@ Plus the usual: `go build ./...`, `go vet ./...`, `go test ./...` from `main/`.
 
 ## Out of scope (don't bolt on without asking)
 
-- Telemetry beyond `slog`
-- Backwards-compat layers / migration shims
-- CI workflows
-- Packaging (.app, .exe, signing)
-- Second SQL dialect
+- **Vault** — Plan B will add the master-password vault: `Vault` inbound port + `adapter/vault` (Argon2id KDF + AES-GCM encryption + optional OS keychain integration via build-tagged `os_darwin.go` / `os_windows.go` / `os_linux.go`). Required at every launch; OS keychain integration is opt-in.
+- **Per-mode UI** — Plan C: the four-mode state machine, peek panel, mode-local History stacks, markdown rendering, drawer animations, the 2.5D canvas itself.
+- **Telemetry beyond `slog`**
+- **Backwards-compat layers / migration shims**
+- **CI workflows**
+- **Packaging** (.app, .exe, signing)
+- **Second SQL dialect**
+- **`adapter/dictionaryfile`** — separate on-disk dictionary persistence lands when real save/load logic does.
+- **Implicit FK heuristic engine** — reverse-engineering logic, not the type model (the Provenance type that records inferred FKs IS in Plan A).
+- **Crow's foot rendering glyphs** — the cardinality/optionality types are in Plan A; the visual rendering lands with the canvas in Plan C.
 
 ## Current state
 

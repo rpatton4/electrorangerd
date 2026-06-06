@@ -20,24 +20,36 @@ electrorangerd follows a hexagonal (ports-and-adapters) architecture. All busine
 │          │                              │ outbound ports │
 │   ┌──────▼──────────────────────────────▼────────────┐  │
 │   │                    port/                         │  │
-│   │   (inbound interfaces)   (outbound interfaces)   │  │
+│   │   (inbound interfaces ONLY — public API)         │  │
 │   └──────────────────────┬───────────────────────────┘  │
 │                          │                              │
 │                   ┌──────▼───────┐                      │
-│                   │    core/     │                      │
-│                   │  (services)  │                      │
-│                   └──────┬───────┘                      │
+│                   │    core/     │  declares OUTBOUND   │
+│                   │  (services)  │  interfaces at point │
+│                   └──────┬───────┘  of use in each file │
 │                          │                              │
-│                   ┌──────▼───────┐                      │
-│                   │   domain/    │                      │
-│                   │ (pure types) │                      │
-│                   └──────────────┘                      │
+│                   ┌──────▼───────────────────────────┐  │
+│                   │            domain/               │  │
+│                   │   Project                        │  │
+│                   │   └─ Database [1..N]             │  │
+│                   │      └─ Schema [1..N]            │  │
+│                   │         └─ Entity                │  │
+│                   │            ├─ Attribute          │  │
+│                   │            ├─ Index              │  │
+│                   │            └─ Constraint         │  │
+│                   │   Project.Relationships          │  │
+│                   │   (cross-schema, cross-DB)       │  │
+│                   │                                  │  │
+│                   │   Dictionary  (separate document │  │
+│                   │   sibling of Project, keyed by   │  │
+│                   │   DictionaryRef)                 │  │
+│                   └──────────────────────────────────┘  │
 │                                                         │
 │   ┌──────────────┐   (helper, no I/O)                   │
 │   │   diagram/   │──────────────────► domain/ only      │
 │   └──────────────┘                                      │
 │                                                         │
-│   cmd/electrorangerd/main.go  ← composition root only  │
+│   cmd/electrorangerd/main.go  ← composition root only   │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -91,3 +103,37 @@ The current outbound interfaces in `core` (`PostgresIntrospector`, `PostgresAppl
 **Coordinate-space discipline**: `internal/diagram/` is logical 2D only. `internal/adapter/ui/` owns the presentation shear. Mouse interaction inverts the shear before calling `diagram.Hit`.
 
 **When to revisit**: if a 2.5D prototype demonstrably fails to satisfy the user's "3D look" requirement (e.g., perspective foreshortening becomes a hard feature ask), reopen this decision with a fresh architect review before any GL code lands.
+
+## Multi-DB / multi-schema hierarchy (decision record)
+
+**Decision**: a Project models one or more PostgreSQL databases, each holding one or more schema namespaces. `Project ⊃ Database[1..N] ⊃ Schema[1..N] ⊃ Entity`. Relationships live at the Project level and may cross schemas AND databases.
+
+**Context**: target deployment is a microservice architecture where each service typically owns its own database. The user explicitly asked for "multiple schemas in one or more databases."
+
+**Why Project ⊃ Database ⊃ Schema and not Project ⊃ Schema**: even for a single-database project, the explicit `Database` layer is one line of friction (`Databases: [{Name:"primary", ...}]`) compared to a god-painful re-key migration later when a second database is needed. The architect's verdict: "Don't collapse Database. Requirement explicitly says one or more databases."
+
+**Cross-DB relationships**: modelled for documentation only. Flyway cannot enforce foreign keys across databases, so cross-DB relationships are surfaced in the dictionary and the diagram but never emitted as SQL constraints. The forward-engineering plan should warn when it skips a cross-DB relationship.
+
+**Database.ProfileName**: each Database carries a name referencing a vault-encrypted ConnectionProfile (Plan B). The project file never contains plaintext DSNs; profiles resolve through the unlocked vault at runtime.
+
+## Crow's foot cardinality + optionality split (decision record)
+
+**Decision**: each Relationship endpoint carries `Cardinality` (One / Many) and `Optionality` (Required / Optional) as two independent enums, rather than a single four-value `RelationshipKind` enum.
+
+**Why**: three reasons, surfaced by the architect review:
+
+1. **Crow's foot literally draws two glyphs per endpoint** — the inner glyph encodes optionality (circle = optional, bar = required) and the outer glyph encodes cardinality (single line = one, crow's foot = many). The renderer reads each independently.
+2. **Forward-engineering cares about each axis separately** — `NOT NULL` (optionality) is one DDL concern; `UNIQUE` (cardinality on the "one" side) is another. Combining them into one enum forces decomposition at every emit site.
+3. **Validation rules read one field each** — "missing optionality" and "ambiguous cardinality" are different findings.
+
+A combined four-value enum would force every renderer, validator, and DDL emitter to immediately decompose it. The split keeps the two orthogonal concerns orthogonal.
+
+## Provenance over Inferred bool (decision record)
+
+**Decision**: `Relationship.Provenance` is a struct of `Source` (`Declared` / `Inferred` / `Manual`), `Confidence` (uint8, 0..255), and `Reason` (human-readable text), rather than a simple `Inferred bool`.
+
+**Why**: when reverse-engineering surfaces an implicit FK to the user for review, the UI needs to show *why* the heuristic fired ("column name `customer_id` matches PK pattern; type `bigint` matches target PK type; confidence 0.86"). A boolean is too thin for that conversation. The architect's note: "You'd add this in three weeks anyway — do it now."
+
+**Why not a separate `InferredRelationship` type**: forces parallel handling code at every relationship-aware site (rendering, validation, drift, forward-eng). One Relationship type with a Provenance field keeps the call sites uniform and lets the reverse-engineering review UI filter on `Provenance.Source == SourceInferred`.
+
+**Confidence units**: uint8 chosen for compact storage and because heuristic engines tend to emit normalized 0..1 scores that scale cleanly to 0..255. The exact scoring scheme is reverse-engineering's concern (Plan C / future).

@@ -12,8 +12,9 @@ const (
 	CmdRemoveRelationship
 )
 
-// Command represents a discrete, reversible schema-editing operation used by
-// the undo/redo history stack.
+// Command is a unit of work on the History stack. Per-mode scoping of the
+// undo/redo stack happens in Plan C inside adapter/ui; the domain Command
+// shape itself is mode-agnostic.
 type Command struct {
 	Kind        CommandKind
 	Description string

@@ -13,17 +13,17 @@ type store struct {
 	log *slog.Logger
 }
 
-// New returns a core.ProjectStore that persists schemas as JSON files.
+// New returns a core.ProjectStore that persists projects as JSON files.
 func New(log *slog.Logger) core.ProjectStore {
 	return &store{log: log}
 }
 
-// Load reads the project file at path and returns the decoded schema.
-func (s *store) Load(_ string) (domain.Schema, error) {
-	return domain.Schema{}, fmt.Errorf("projectfile load: %w", errs.ErrNotImplemented)
+// Load reads the project file at path and returns the decoded project.
+func (s *store) Load(_ string) (domain.Project, error) {
+	return domain.Project{}, fmt.Errorf("projectfile load: %w", errs.ErrNotImplemented)
 }
 
-// Save encodes schema as JSON and writes it to path.
-func (s *store) Save(_ string, _ domain.Schema) error {
+// Save encodes project as JSON and writes it to path.
+func (s *store) Save(_ string, _ domain.Project) error {
 	return fmt.Errorf("projectfile save: %w", errs.ErrNotImplemented)
 }

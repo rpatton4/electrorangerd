@@ -8,7 +8,9 @@ type WindowState struct {
 }
 
 // ConnectionProfile holds a named database connection string for the user's
-// connection picker.
+// connection picker. Plan B moves DSN handling to the Vault — DSN will
+// become an opaque encrypted blob (or the field will be removed in favor
+// of a vault lookup by Name). Until Plan B lands, DSN remains plaintext.
 type ConnectionProfile struct {
 	Name string
 	DSN  string

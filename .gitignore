@@ -1,6 +1,8 @@
-# binaries / executables
-electrorangerd
-electrorangerd-*
+# binaries / executables (anchored: must not match the cmd/electrorangerd/ source dir)
+/electrorangerd
+/electrorangerd-*
+/cmd/electrorangerd/electrorangerd
+/cmd/electrorangerd/electrorangerd-*
 /bin/
 *.exe
 *.test

@@ -20,7 +20,7 @@ func NewIntrospector(conn *Connection, log *slog.Logger) core.PostgresIntrospect
 	return &introspector{conn: conn, log: log}
 }
 
-// Introspect reads the live database schema and returns it as a domain.Schema.
-func (i *introspector) Introspect(_ context.Context) (domain.Schema, error) {
-	return domain.Schema{}, fmt.Errorf("postgres introspect: %w", errs.ErrNotImplemented)
+// Introspect reads the live database and returns it as a domain.Project.
+func (i *introspector) Introspect(_ context.Context) (domain.Project, error) {
+	return domain.Project{}, fmt.Errorf("postgres introspect: %w", errs.ErrNotImplemented)
 }

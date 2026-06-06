@@ -1,6 +1,25 @@
 package domain
 
-// IssueSeverity indicates how serious a validation finding is.
+// ValidationProfile selects which subset of validation rules apply. Different
+// modes tolerate different classes of issue — for example, a Reverse-
+// engineering draft accepts missing PRIMARY KEY warnings that strict
+// diagram editing would refuse.
+type ValidationProfile int
+
+const (
+	ProfileStrict ValidationProfile = iota
+	ProfileReverseDraft
+	ProfileDiagramEdit
+)
+
+// ValidationIssue is one finding from a Validator run.
+type ValidationIssue struct {
+	Severity IssueSeverity
+	Target   string
+	Message  string
+}
+
+// IssueSeverity classifies a ValidationIssue.
 type IssueSeverity int
 
 const (
@@ -8,10 +27,3 @@ const (
 	SeverityWarning
 	SeverityError
 )
-
-// ValidationIssue describes a single problem found during schema validation.
-type ValidationIssue struct {
-	Severity IssueSeverity
-	Target   string
-	Message  string
-}

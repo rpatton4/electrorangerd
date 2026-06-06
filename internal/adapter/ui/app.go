@@ -17,14 +17,15 @@ import (
 // port interface so that event handlers can delegate domain work without
 // importing concrete implementations.
 type App struct {
-	forward   port.ForwardEngineer
-	reverse   port.ReverseEngineer
-	drift     port.DriftDetector
-	project   port.ProjectService
-	validator port.Validator
-	history   port.History
-	log       *slog.Logger
-	theme     *Theme
+	forward    port.ForwardEngineer
+	reverse    port.ReverseEngineer
+	drift      port.DriftDetector
+	project    port.ProjectService
+	validator  port.Validator
+	history    port.History
+	dictionary port.DictionaryService
+	log        *slog.Logger
+	theme      *Theme
 }
 
 // NewApp constructs the App with all required port dependencies and a freshly
@@ -36,17 +37,19 @@ func NewApp(
 	proj port.ProjectService,
 	val port.Validator,
 	hist port.History,
+	dict port.DictionaryService,
 	log *slog.Logger,
 ) *App {
 	return &App{
-		forward:   fwd,
-		reverse:   rev,
-		drift:     drift,
-		project:   proj,
-		validator: val,
-		history:   hist,
-		log:       log,
-		theme:     NewTheme(),
+		forward:    fwd,
+		reverse:    rev,
+		drift:      drift,
+		project:    proj,
+		validator:  val,
+		history:    hist,
+		dictionary: dict,
+		log:        log,
+		theme:      NewTheme(),
 	}
 }
 

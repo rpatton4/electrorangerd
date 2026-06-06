@@ -11,12 +11,11 @@ type driftService struct {
 	log *slog.Logger
 }
 
-// NewDriftDetector returns a port.DriftDetector. Drift detection is a pure
-// in-memory comparison, so no outbound adapters are needed.
+// NewDriftDetector constructs a DriftDetector wired to a structured logger.
 func NewDriftDetector(log *slog.Logger) port.DriftDetector {
 	return &driftService{log: log}
 }
 
-func (s *driftService) Compare(left, right domain.Schema) domain.DriftReport {
+func (s *driftService) Compare(_, _ domain.Project) domain.DriftReport {
 	return domain.DriftReport{}
 }

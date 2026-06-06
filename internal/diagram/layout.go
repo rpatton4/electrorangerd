@@ -15,10 +15,11 @@ type Box struct {
 	Width, Height float32
 }
 
-// Auto computes an initial layout for all entities in schema, returning a map
-// from entity name to its assigned Box. The current implementation is a stub
-// that returns nil; the real algorithm (force-directed or grid) will replace it
-// without changing the signature.
-func Auto(_ domain.Schema) map[string]Box {
+// Auto computes an initial layout for every entity in a Project, returning a
+// map from fully-qualified EntityRef to its assigned Box. EntityRef keys
+// disambiguate entities whose names collide across databases or schemas. The
+// current implementation is a stub that returns nil; the real algorithm
+// (force-directed or grid) will replace it without changing the signature.
+func Auto(_ domain.Project) map[domain.EntityRef]Box {
 	return nil
 }
