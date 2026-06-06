@@ -20,6 +20,18 @@ import (
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
 )
 
+// screenType distinguishes the top-level UI surfaces inside the app shell.
+// The welcome chooser is the initial screen at launch; the password screen
+// fires when the user picks a mode but the vault is not yet unlocked; the
+// mode shell is the existing nav + active-mode view + peek panel.
+type screenType int
+
+const (
+	screenWelcome screenType = iota
+	screenPassword
+	screenMode
+)
+
 // App is the root of the GIOUI adapter. It owns the four-mode state machine,
 // the master-password gate, and the peek panel. Per-mode views are lazily
 // constructed after the vault unlocks.
@@ -45,12 +57,17 @@ type App struct {
 	// Password gate.
 	password *passwordView
 
+	// Screen state — welcome chooser vs. active-mode shell.
+	screen    screenType
+	homeClick widget.Clickable
+
 	// Mode state.
 	mode       Mode
 	modeClicks [len(allModes)]widget.Clickable
 	peekToggle widget.Clickable
 
 	// Per-mode views (built after the password gate clears).
+	welcomeView    *welcomeView
 	diagramView    *diagramView
 	forwardView    *forwardView
 	dictionaryView *dictionaryView
@@ -87,6 +104,7 @@ func NewApp(
 		log:               log,
 		theme:             NewTheme(),
 		mode:              ModeDiagram,
+		screen:            screenWelcome,
 	}
 	a.peek = panel.New(dict)
 	return a
@@ -128,45 +146,61 @@ func (a *App) loop(w *app.Window) error {
 	}
 }
 
-// frame is called once per FrameEvent. It fills the background, gates on the
-// master-password prompt, and (once unlocked) dispatches to the active mode
-// view and the peek panel.
+// frame is called once per FrameEvent. It fills the background, ensures the
+// views are constructed on the first frame, and dispatches to the current
+// screen (welcome chooser, password gate, or mode shell).
 func (a *App) frame(gtx layout.Context) {
 	a.fillBackground(gtx, color.NRGBA{R: 0x0A, G: 0x0B, B: 0x10, A: 0xFF})
 
 	if a.password == nil {
-		a.password = newPasswordView(a.vault, a.log)
+		a.initViews()
 		a.password.tryKeychainUnlock(context.Background())
 	}
-	if !a.password.Done() {
-		a.password.Layout(gtx, a.theme.Material)
-		return
-	}
-	if a.diagramView == nil {
-		a.initViews()
+
+	// Advance from the password screen to the mode shell as soon as unlock
+	// completes — covers both the explicit Unlock/Create-vault click and the
+	// opt-in keychain auto-unlock that fires on the first frame.
+	if a.screen == screenPassword && a.password.Done() {
+		a.screen = screenMode
 	}
 
-	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.layoutModeNav(gtx)
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return a.layoutCurrentView(gtx)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.peek.Layout(gtx, a.theme.Material)
-				}),
-			)
-		}),
-	)
+	switch a.screen {
+	case screenWelcome:
+		a.welcomeView.Layout(gtx, a.theme.Material)
+	case screenPassword:
+		a.password.Layout(gtx, a.theme.Material)
+	case screenMode:
+		layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutModeNav(gtx)
+			}),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return a.layoutCurrentView(gtx)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.peek.Layout(gtx, a.theme.Material)
+					}),
+				)
+			}),
+		)
+	}
 }
 
-// initViews creates the per-mode views once the master vault is unlocked.
-// They are not constructed eagerly because the dictionary view's markdown
-// renderer touches the theme and we want zero work before authentication.
+// initViews builds the password gate, the welcome chooser, and the four
+// per-mode views. Called once at the start of the first frame — the nil
+// a.password serves as the "first frame" sentinel.
 func (a *App) initViews() {
+	a.password = newPasswordView(a.vault, a.log)
+	a.welcomeView = newWelcomeView(func(m Mode) {
+		a.mode = m
+		if a.password.Done() {
+			a.screen = screenMode
+		} else {
+			a.screen = screenPassword
+		}
+	})
 	a.diagramView = newDiagramView(a.diagramHistory)
 	a.forwardView = newForwardView(a.forward)
 	a.dictionaryView = newDictionaryView(a.dictionary, a.dictionaryHistory, a.theme.Material)
@@ -184,7 +218,17 @@ func (a *App) fillBackground(gtx layout.Context, c color.NRGBA) {
 // peek-toggle button at the right.
 func (a *App) layoutModeNav(gtx layout.Context) layout.Dimensions {
 	return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		children := make([]layout.FlexChild, 0, len(allModes)*2+2)
+		if a.homeClick.Clicked(gtx) {
+			a.screen = screenWelcome
+		}
+
+		children := make([]layout.FlexChild, 0, len(allModes)*2+4)
+		children = append(children,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return material.Button(a.theme.Material, &a.homeClick, "Home").Layout(gtx)
+			}),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+		)
 		for i, m := range allModes {
 			i, m := i, m
 			if a.modeClicks[i].Clicked(gtx) {

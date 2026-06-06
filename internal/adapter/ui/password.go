@@ -3,8 +3,11 @@ package ui
 import (
 	"context"
 	"errors"
+	"image/color"
 	"log/slog"
 
+	"gioui.org/font"
+	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/unit"
 	"gioui.org/widget"
@@ -34,8 +37,9 @@ type passwordView struct {
 	editor widget.Editor
 	submit widget.Clickable
 
-	phase   passwordPhase
-	lastErr string
+	phase          passwordPhase
+	lastErr        string
+	focusRequested bool
 }
 
 func newPasswordView(vault port.Vault, log *slog.Logger) *passwordView {
@@ -105,6 +109,11 @@ func (v *passwordView) Layout(gtx layout.Context, th *material.Theme) layout.Dim
 		v.handleSubmit()
 	}
 
+	if !v.focusRequested {
+		gtx.Execute(key.FocusCmd{Tag: &v.editor})
+		v.focusRequested = true
+	}
+
 	title := "Unlock master vault"
 	help := "Enter your master password to unlock the connection vault."
 	button := "Unlock"
@@ -122,7 +131,9 @@ func (v *passwordView) Layout(gtx layout.Context, th *material.Theme) layout.Dim
 				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 				layout.Rigid(material.Body2(th, help).Layout),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
-				layout.Rigid(material.Editor(th, &v.editor, "master password").Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return v.layoutEditor(gtx, th)
+				}),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 				layout.Rigid(material.Button(th, &v.submit, button).Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -132,6 +143,41 @@ func (v *passwordView) Layout(gtx layout.Context, th *material.Theme) layout.Dim
 					return layout.Inset{Top: unit.Dp(12)}.Layout(gtx,
 						material.Body2(th, v.lastErr).Layout,
 					)
+				}),
+			)
+		})
+	})
+}
+
+// layoutEditor draws the password input with a visible bordered chrome, a
+// focus-aware accent on the border, and an italic "master password" hint
+// overlaid on the editor when the field is empty. The hint disappears as
+// soon as the user types and reappears if they clear the field.
+func (v *passwordView) layoutEditor(gtx layout.Context, th *material.Theme) layout.Dimensions {
+	borderColor := color.NRGBA{R: 0x4A, G: 0x4B, B: 0x58, A: 0xFF}
+	if gtx.Focused(&v.editor) {
+		borderColor = color.NRGBA{R: 0x7F, G: 0x9C, B: 0xF4, A: 0xFF}
+	}
+	border := widget.Border{
+		Color:        borderColor,
+		Width:        unit.Dp(1),
+		CornerRadius: unit.Dp(4),
+	}
+	return border.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Stack{}.Layout(gtx,
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					ed := material.Editor(th, &v.editor, "")
+					return ed.Layout(gtx)
+				}),
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					if v.editor.Text() != "" {
+						return layout.Dimensions{}
+					}
+					hint := material.Body1(th, "master password")
+					hint.Font.Style = font.Italic
+					hint.Color = color.NRGBA{R: 0x7A, G: 0x7B, B: 0x85, A: 0xFF}
+					return hint.Layout(gtx)
 				}),
 			)
 		})
