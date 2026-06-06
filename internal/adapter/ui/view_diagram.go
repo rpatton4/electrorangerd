@@ -13,7 +13,6 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
-	"gioui.org/op/paint"
 	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
@@ -167,7 +166,7 @@ func (v *diagramView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensi
 			continue
 		}
 		stk := op.Affine(f32.Affine2D{}.Offset(f32.Pt(pos.X, pos.Y))).Push(gtx.Ops)
-		v.canvas.Entity(gtx, th.Material, palette, ent)
+		v.canvas.Entity(gtx, th.Material, palette, v.entityForRender(ent))
 		if v.selected == ent.ID {
 			v.canvas.EntitySelection(gtx, palette, ent)
 		}
@@ -515,6 +514,30 @@ func (v *diagramView) applyKeyMarker(sel int) {
 	}
 }
 
+// entityForRender returns a copy of ent with the text being edited blanked
+// out, so the inline editor can paint its own text on top without the
+// underlying static text bleeding through. The chrome (rows, dividers,
+// outline) is unchanged — only the text glyphs for the active field are
+// suppressed. Returns ent unchanged when no edit is in flight on it.
+func (v *diagramView) entityForRender(ent domain.Entity) domain.Entity {
+	if v.edit.kind == editNone || v.edit.entityID != ent.ID {
+		return ent
+	}
+	switch v.edit.kind {
+	case editHeader:
+		ent.Name = ""
+	case editAttrName:
+		aIdx := v.edit.attrIdx
+		if aIdx < 0 || aIdx >= len(ent.Attributes) {
+			return ent
+		}
+		attrs := append([]domain.Attribute(nil), ent.Attributes...)
+		attrs[aIdx].Name = ""
+		ent.Attributes = attrs
+	}
+	return ent
+}
+
 // entityPosition returns the screen-space placement to render and hit-test
 // the entity at. While a drag is in flight the dragged entity's position
 // is the transient ghost (v.dragPos); every other entity reads from
@@ -734,13 +757,11 @@ func (v *diagramView) layoutEditOverlay(gtx layout.Context, th *theme.Theme) {
 	defer stk.Pop()
 
 	sz := image.Pt(area.Dx(), area.Dy())
-	bgClip := clip.Rect{Max: sz}.Push(gtx.Ops)
-	paint.ColorOp{Color: th.SurfaceContainer}.Add(gtx.Ops)
-	paint.PaintOp{}.Add(gtx.Ops)
-	bgClip.Pop()
 
-	stroke := gtx.Dp(unit.Dp(1))
-	drawRectStroke(gtx, sz, stroke, th.Primary)
+	// No background fill, no outline. The entity render already skips
+	// the text for the field being edited (see entityForRender) so the
+	// row dividers and column lines stay intact; the editor paints its
+	// glyphs and caret directly on top.
 
 	// Record at natural size and centre vertically — see canvas/entity.go's
 	// textInArea for why widget.Label's reported height needs this dance.
@@ -759,18 +780,6 @@ func (v *diagramView) layoutEditOverlay(gtx layout.Context, th *theme.Theme) {
 	offset := op.Affine(f32.Affine2D{}.Offset(f32.Pt(0, float32(dy)))).Push(gtx.Ops)
 	call.Add(gtx.Ops)
 	offset.Pop()
-}
-
-func drawRectStroke(gtx layout.Context, size image.Point, stroke int, col color.NRGBA) {
-	fill := func(r image.Rectangle) {
-		defer clip.Rect{Min: r.Min, Max: r.Max}.Push(gtx.Ops).Pop()
-		paint.ColorOp{Color: col}.Add(gtx.Ops)
-		paint.PaintOp{}.Add(gtx.Ops)
-	}
-	fill(image.Rect(0, 0, size.X, stroke))
-	fill(image.Rect(0, size.Y-stroke, size.X, size.Y))
-	fill(image.Rect(0, 0, stroke, size.Y))
-	fill(image.Rect(size.X-stroke, 0, size.X, size.Y))
 }
 
 func pointInRect(p f32.Point, r image.Rectangle) bool {
