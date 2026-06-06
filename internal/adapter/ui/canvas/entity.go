@@ -140,6 +140,24 @@ func keyMarker(a domain.Attribute) string {
 // order starting from the top-left handle.
 const HandleCount = 8
 
+// HandleOutward returns the unit vector pointing away from the entity at
+// the given handle index. Callers that route relationship lines
+// orthogonally use this so the line leaves each handle perpendicular to
+// the entity edge, which keeps the crow's-foot marker readable.
+func HandleOutward(handle int) f32.Point {
+	switch handle {
+	case 0, 1:
+		return f32.Pt(0, -1)
+	case 2, 3:
+		return f32.Pt(1, 0)
+	case 4, 5:
+		return f32.Pt(0, 1)
+	case 6, 7:
+		return f32.Pt(-1, 0)
+	}
+	return f32.Point{}
+}
+
 // HandlePosition returns the offset (in gtx pixels) of the handle at index
 // from the entity's top-left corner. Both EntitySelection and any caller
 // that needs to attach a line to a handle should use this so the visual
@@ -193,17 +211,26 @@ func (c *Canvas) EntitySelection(gtx layout.Context, p EntityPalette, e domain.E
 	}
 }
 
-// RelationshipLine draws a single straight line between two screen-space
-// points in the selection accent colour. When bold is true the stroke is
-// thicker, which the diagram view uses to mark the currently-selected
-// relationship. Caller renders the line in the diagram-view coordinate
-// space (no per-entity transform pushed).
-func (c *Canvas) RelationshipLine(gtx layout.Context, p EntityPalette, from, to f32.Point, bold bool) {
+// RelationshipLine draws a polyline through pts in the selection accent
+// colour. With two points it is a straight line; with more it forms a
+// connected path with right-angle bends. bold thickens the stroke so the
+// diagram view can mark the currently-selected relationship.
+func (c *Canvas) RelationshipLine(gtx layout.Context, p EntityPalette, pts []f32.Point, bold bool) {
+	if len(pts) < 2 {
+		return
+	}
 	width := float32(gtx.Dp(unit.Dp(2)))
 	if bold {
 		width = float32(gtx.Dp(unit.Dp(4)))
 	}
-	drawLine(gtx, p.Selection, from, to, width)
+	var path clip.Path
+	path.Begin(gtx.Ops)
+	path.MoveTo(pts[0])
+	for _, pt := range pts[1:] {
+		path.LineTo(pt)
+	}
+	spec := path.End()
+	paint.FillShape(gtx.Ops, p.Selection, clip.Stroke{Path: spec, Width: width}.Op())
 }
 
 // RelationshipMarker draws the crow's-foot cardinality glyph at one end of

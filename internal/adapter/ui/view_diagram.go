@@ -658,8 +658,8 @@ func (v *diagramView) deleteRelationship(id domain.RelationshipID) {
 }
 
 // hitRelationshipLine returns the ID of the relationship whose currently
-// rendered line is within a forgiving tolerance of p, if any. Used to
-// detect double-click targets on the lines.
+// rendered polyline is within a forgiving tolerance of p, if any. Each
+// segment of the orthogonal route is tested independently.
 func (v *diagramView) hitRelationshipLine(gtx layout.Context, p f32.Point) (domain.RelationshipID, bool) {
 	tolerance := float32(gtx.Dp(unit.Dp(6)))
 	tol2 := tolerance * tolerance
@@ -681,12 +681,11 @@ func (v *diagramView) hitRelationshipLine(gtx layout.Context, p f32.Point) (doma
 			continue
 		}
 		fh, th := v.nearestHandlePair(gtx, fromEnt, fromPos, toEnt, toPos)
-		fx, fy := canvas.HandlePosition(gtx, fromEnt, fh)
-		tx, ty := canvas.HandlePosition(gtx, toEnt, th)
-		a := f32.Pt(fromPos.X+fx, fromPos.Y+fy)
-		b := f32.Pt(toPos.X+tx, toPos.Y+ty)
-		if distanceSquaredToSegment(p, a, b) <= tol2 {
-			return rel.ID, true
+		route := v.orthogonalRoute(gtx, fromEnt, fromPos, fh, toEnt, toPos, th)
+		for i := 0; i < len(route)-1; i++ {
+			if distanceSquaredToSegment(p, route[i], route[i+1]) <= tol2 {
+				return rel.ID, true
+			}
 		}
 	}
 	return 0, false
@@ -886,19 +885,56 @@ func (v *diagramView) nearestHandle(gtx layout.Context, id domain.EntityID, p f3
 }
 
 // nearestHandlePair returns the (from, to) handle indices on the two
-// entities whose centres minimise the squared distance — used to
-// auto-route relationship lines so they re-anchor as entities move.
+// entities whose centres minimise the squared distance among pairs whose
+// outward directions both face the other entity. Facing handles produce
+// the cleanest orthogonal routes because each stub goes toward the
+// other side, not away from it. Falls back to plain nearest-distance if
+// no facing pair exists (entities overlap, etc).
 func (v *diagramView) nearestHandlePair(gtx layout.Context, fromEnt domain.Entity, fromPos domain.Position, toEnt domain.Entity, toPos domain.Position) (int, int) {
-	bestFrom, bestTo := 0, 0
+	_, _, fromW, fromH := v.entityBox(gtx, fromEnt, fromPos)
+	_, _, toW, toH := v.entityBox(gtx, toEnt, toPos)
+	fromCentre := f32.Pt(fromPos.X+fromW/2, fromPos.Y+fromH/2)
+	toCentre := f32.Pt(toPos.X+toW/2, toPos.Y+toH/2)
+
+	bestFrom, bestTo := -1, -1
 	var bestD2 float32 = 1e18
 	for fh := 0; fh < canvas.HandleCount; fh++ {
 		fx, fy := canvas.HandlePosition(gtx, fromEnt, fh)
-		fxAbs := fromPos.X + fx
-		fyAbs := fromPos.Y + fy
+		fromAbs := f32.Pt(fromPos.X+fx, fromPos.Y+fy)
+		fromDir := canvas.HandleOutward(fh)
+		// Outward must face the other entity's centre.
+		if fromDir.X*(toCentre.X-fromAbs.X)+fromDir.Y*(toCentre.Y-fromAbs.Y) <= 0 {
+			continue
+		}
 		for th := 0; th < canvas.HandleCount; th++ {
 			tx, ty := canvas.HandlePosition(gtx, toEnt, th)
-			dx := (toPos.X + tx) - fxAbs
-			dy := (toPos.Y + ty) - fyAbs
+			toAbs := f32.Pt(toPos.X+tx, toPos.Y+ty)
+			toDir := canvas.HandleOutward(th)
+			if toDir.X*(fromCentre.X-toAbs.X)+toDir.Y*(fromCentre.Y-toAbs.Y) <= 0 {
+				continue
+			}
+			dx := toAbs.X - fromAbs.X
+			dy := toAbs.Y - fromAbs.Y
+			d2 := dx*dx + dy*dy
+			if d2 < bestD2 {
+				bestD2 = d2
+				bestFrom = fh
+				bestTo = th
+			}
+		}
+	}
+	if bestFrom >= 0 {
+		return bestFrom, bestTo
+	}
+	// Fallback: pure nearest distance, ignoring facing.
+	bestFrom, bestTo = 0, 0
+	bestD2 = 1e18
+	for fh := 0; fh < canvas.HandleCount; fh++ {
+		fx, fy := canvas.HandlePosition(gtx, fromEnt, fh)
+		for th := 0; th < canvas.HandleCount; th++ {
+			tx, ty := canvas.HandlePosition(gtx, toEnt, th)
+			dx := (toPos.X + tx) - (fromPos.X + fx)
+			dy := (toPos.Y + ty) - (fromPos.Y + fy)
 			d2 := dx*dx + dy*dy
 			if d2 < bestD2 {
 				bestD2 = d2
@@ -955,9 +991,11 @@ func (v *diagramView) completeLink(gtx layout.Context, p f32.Point) {
 	v.cancelLink()
 }
 
-// layoutRelationships draws every stored relationship as a straight line
-// between the nearest pair of handles on its two endpoint entities, so
-// lines re-route automatically as entities are moved.
+// layoutRelationships draws every stored relationship as a 90-degree
+// routed polyline between the nearest pair of handles on its two endpoint
+// entities. The orthogonal segments leave each entity perpendicular to
+// its edge, so the crow's-foot markers at each end sit on a stub
+// perpendicular to the entity body and stay readable.
 func (v *diagramView) layoutRelationships(gtx layout.Context, palette canvas.EntityPalette) {
 	for _, rel := range v.project.Relationships {
 		fromEnt, _, _, ok := domain.FindEntity(v.project, rel.From.Entity)
@@ -977,18 +1015,18 @@ func (v *diagramView) layoutRelationships(gtx layout.Context, palette canvas.Ent
 			continue
 		}
 		fh, th := v.nearestHandlePair(gtx, fromEnt, fromPos, toEnt, toPos)
-		fx, fy := canvas.HandlePosition(gtx, fromEnt, fh)
-		tx, ty := canvas.HandlePosition(gtx, toEnt, th)
-		from := f32.Pt(fromPos.X+fx, fromPos.Y+fy)
-		to := f32.Pt(toPos.X+tx, toPos.Y+ty)
-		v.canvas.RelationshipLine(gtx, palette, from, to, v.selectedRel == rel.ID)
-		v.canvas.RelationshipMarker(gtx, palette, from, to, rel.SourceCardinality)
-		v.canvas.RelationshipMarker(gtx, palette, to, from, rel.TargetCardinality)
+		route := v.orthogonalRoute(gtx, fromEnt, fromPos, fh, toEnt, toPos, th)
+		v.canvas.RelationshipLine(gtx, palette, route, v.selectedRel == rel.ID)
+		last := len(route) - 1
+		v.canvas.RelationshipMarker(gtx, palette, route[0], route[1], rel.SourceCardinality)
+		v.canvas.RelationshipMarker(gtx, palette, route[last], route[last-1], rel.TargetCardinality)
 	}
 }
 
 // layoutLinkInFlight draws the line currently being dragged out of a
-// handle, from the originally-clicked handle to the live cursor.
+// handle, from the originally-clicked handle to the live cursor. It
+// stays a single straight segment during drawing — the orthogonal route
+// only kicks in once the relationship lands.
 func (v *diagramView) layoutLinkInFlight(gtx layout.Context, palette canvas.EntityPalette) {
 	ent, _, _, ok := domain.FindEntity(v.project, v.linkFromID)
 	if !ok {
@@ -1000,10 +1038,49 @@ func (v *diagramView) layoutLinkInFlight(gtx layout.Context, palette canvas.Enti
 	}
 	hx, hy := canvas.HandlePosition(gtx, ent, v.linkFromHandle)
 	v.canvas.RelationshipLine(gtx, palette,
-		f32.Pt(pos.X+hx, pos.Y+hy),
-		v.linkCursor,
+		[]f32.Point{
+			f32.Pt(pos.X+hx, pos.Y+hy),
+			v.linkCursor,
+		},
 		false,
 	)
+}
+
+// orthogonalRoute returns the polyline points that connect two handles
+// with 90-degree bends. Perpendicular stub directions get an L with one
+// bend; same-axis stubs get a Z with two bends, with the cross segment
+// placed between the two entity edges. The route includes no overshoot
+// stubs — the line leaves each entity in the handle's outward direction
+// because the next bend lies in that direction.
+func (v *diagramView) orthogonalRoute(gtx layout.Context, fromEnt domain.Entity, fromPos domain.Position, fromHandle int, toEnt domain.Entity, toPos domain.Position, toHandle int) []f32.Point {
+	fx, fy := canvas.HandlePosition(gtx, fromEnt, fromHandle)
+	fromAbs := f32.Pt(fromPos.X+fx, fromPos.Y+fy)
+	tx, ty := canvas.HandlePosition(gtx, toEnt, toHandle)
+	toAbs := f32.Pt(toPos.X+tx, toPos.Y+ty)
+
+	fromDir := canvas.HandleOutward(fromHandle)
+	toDir := canvas.HandleOutward(toHandle)
+	fromIsH := fromDir.Y == 0
+	toIsH := toDir.Y == 0
+
+	pts := []f32.Point{fromAbs}
+	if fromIsH == toIsH {
+		if fromIsH {
+			midX := (fromAbs.X + toAbs.X) / 2
+			pts = append(pts, f32.Pt(midX, fromAbs.Y), f32.Pt(midX, toAbs.Y))
+		} else {
+			midY := (fromAbs.Y + toAbs.Y) / 2
+			pts = append(pts, f32.Pt(fromAbs.X, midY), f32.Pt(toAbs.X, midY))
+		}
+	} else {
+		if fromIsH {
+			pts = append(pts, f32.Pt(toAbs.X, fromAbs.Y))
+		} else {
+			pts = append(pts, f32.Pt(fromAbs.X, toAbs.Y))
+		}
+	}
+	pts = append(pts, toAbs)
+	return pts
 }
 
 // entityForRender returns a copy of ent with the text being edited blanked

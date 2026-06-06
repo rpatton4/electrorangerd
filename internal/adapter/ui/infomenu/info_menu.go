@@ -169,8 +169,13 @@ func (m *InfoMenu) LayoutInfoArea(gtx layout.Context) layout.Dimensions {
 	btnSz := gtx.Dp(unit.Dp(56))
 	cx := areaW / 2
 	baselineY := gtx.Dp(unit.Dp(62))
-	bumpApexY := gtx.Dp(unit.Dp(32))
-	bumpHalfW := gtx.Dp(unit.Dp(75))
+	// The nav button has 28dp radius and a centre at (cx, 67dp). The
+	// bump dimensions keep ~10dp clearance from the button: the apex
+	// sits 38dp above the centre (29dp Y) and the half-width is wide
+	// enough that the cubic's inward bulge stays outside a 38dp circle
+	// around the button centre.
+	bumpApexY := gtx.Dp(unit.Dp(29))
+	bumpHalfW := gtx.Dp(unit.Dp(65))
 	strokeW := float32(gtx.Dp(unit.Dp(2)))
 	btnY := gtx.Dp(unit.Dp(39))
 
