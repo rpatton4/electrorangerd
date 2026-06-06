@@ -44,6 +44,7 @@ type ProjectService interface {
 // in-memory state and pushes a domain.Command onto the History stack.
 type DiagramEditor interface {
 	AddEntity(ctx context.Context, project domain.Project, db, schema string, entity domain.Entity) (domain.Project, error)
+	UpdateEntity(ctx context.Context, project domain.Project, db, schema string, entityIdx int, entity domain.Entity) (domain.Project, error)
 }
 
 // Validator checks a Project for logical and structural problems under a

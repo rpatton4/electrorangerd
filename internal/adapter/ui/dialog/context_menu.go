@@ -61,9 +61,40 @@ func (m *ContextMenu) Anchor() image.Point { return m.anchor }
 // Layout draws the menu (when open) and returns the index of any item that
 // was clicked this frame, or -1. Selecting an item closes the menu. Clicks
 // outside the menu close it without selecting anything.
+//
+// Click drains happen BEFORE the corresponding Layout calls because
+// widget.Clickable.Layout drains the gesture queue and discards results
+// (see gioui.org/widget/button.go layout()). Calling Clicked() after Layout
+// always returns false.
 func (m *ContextMenu) Layout(gtx layout.Context, th *theme.Theme) int {
 	if !m.open {
 		return -1
+	}
+
+	// Drain scrim clicks BEFORE rendering — events were queued against the
+	// prior frame's registration and Layout would discard them.
+	for m.scrim.Clicked(gtx) {
+		m.open = false
+	}
+	// Per-item click drain, also before any Layout call.
+	selected := -1
+	for i := range m.Items {
+		item := &m.Items[i]
+		clicked := false
+		for item.click.Clicked(gtx) {
+			clicked = true
+		}
+		if clicked {
+			selected = i
+			m.open = false
+		}
+	}
+
+	// If something dismissed the menu above, don't bother registering the
+	// scrim and items for this frame — they'd capture stray clicks the
+	// caller's own handlers can act on.
+	if !m.open {
+		return selected
 	}
 
 	scrimClip := clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops)
@@ -71,15 +102,12 @@ func (m *ContextMenu) Layout(gtx layout.Context, th *theme.Theme) int {
 		return layout.Dimensions{Size: gtx.Constraints.Max}
 	})
 	scrimClip.Pop()
-	for m.scrim.Clicked(gtx) {
-		m.open = false
-	}
 
 	width := gtx.Dp(unit.Dp(180))
 	itemH := gtx.Dp(unit.Dp(32))
 	height := itemH * len(m.Items)
 	if height == 0 {
-		return -1
+		return selected
 	}
 
 	panel := op.Affine(f32.Affine2D{}.Offset(f32.Pt(float32(m.anchor.X), float32(m.anchor.Y)))).Push(gtx.Ops)
@@ -93,7 +121,6 @@ func (m *ContextMenu) Layout(gtx layout.Context, th *theme.Theme) int {
 	stroke := gtx.Dp(unit.Dp(1))
 	fillBorder(gtx, image.Rect(0, 0, width, height), stroke, th.Outline)
 
-	selected := -1
 	for i := range m.Items {
 		item := &m.Items[i]
 		offsetY := i * itemH
@@ -109,14 +136,6 @@ func (m *ContextMenu) Layout(gtx layout.Context, th *theme.Theme) int {
 			})
 		})
 		itemArea.Pop()
-		clickedThisFrame := false
-		for item.click.Clicked(gtx) {
-			clickedThisFrame = true
-		}
-		if clickedThisFrame {
-			selected = i
-			m.open = false
-		}
 	}
 	return selected
 }

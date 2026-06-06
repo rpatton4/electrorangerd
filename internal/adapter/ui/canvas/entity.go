@@ -62,25 +62,31 @@ func (c *Canvas) Entity(gtx layout.Context, th *material.Theme, p EntityPalette,
 	}
 	strokeOutline(gtx, size, stroke, p.Stroke)
 
-	// Text: header label, then per-row key marker + attribute name.
-	textInArea(gtx, image.Rect(0, 0, boxW, headerH), layout.Center, func(gtx layout.Context) layout.Dimensions {
+	// Text: header label, then per-row key marker + attribute name. All three
+	// fields are left-aligned with a consistent 8dp inset from the left edge
+	// of their container box, matching the right column's padding. Horizontal
+	// alignment is text.Start; vertical centring is computed manually in
+	// textInArea because widget.Label clamps its reported dims to
+	// gtx.Constraints, which defeats layout.Direction.Layout's offset pass.
+	pad := gtx.Dp(unit.Dp(8))
+	textInArea(gtx, image.Rect(pad, 0, boxW-pad, headerH), func(gtx layout.Context) layout.Dimensions {
 		lbl := material.Label(th, unit.Sp(14), e.Name)
 		lbl.Color = p.OnSurface
-		lbl.Alignment = text.Middle
+		lbl.Alignment = text.Start
 		return lbl.Layout(gtx)
 	})
 	for i, attr := range e.Attributes {
 		rowY := headerH + i*rowH
-		textInArea(gtx, image.Rect(0, rowY, keyW, rowY+rowH), layout.Center, func(gtx layout.Context) layout.Dimensions {
+		textInArea(gtx, image.Rect(pad, rowY, keyW, rowY+rowH), func(gtx layout.Context) layout.Dimensions {
 			lbl := material.Body2(th, keyMarker(attr))
 			lbl.Color = p.OnSurface
-			lbl.Alignment = text.Middle
+			lbl.Alignment = text.Start
 			return lbl.Layout(gtx)
 		})
-		pad := gtx.Dp(unit.Dp(8))
-		textInArea(gtx, image.Rect(keyW+pad, rowY, boxW-pad, rowY+rowH), layout.W, func(gtx layout.Context) layout.Dimensions {
+		textInArea(gtx, image.Rect(keyW+pad, rowY, boxW-pad, rowY+rowH), func(gtx layout.Context) layout.Dimensions {
 			lbl := material.Body2(th, attr.Name)
 			lbl.Color = p.OnSurface
+			lbl.Alignment = text.Start
 			return lbl.Layout(gtx)
 		})
 	}
@@ -101,17 +107,26 @@ func strokeOutline(gtx layout.Context, size image.Point, stroke int, col color.N
 	fillRect(gtx, image.Rect(size.X-stroke, 0, size.X, size.Y), col)
 }
 
-func textInArea(gtx layout.Context, r image.Rectangle, dir layout.Direction, body func(gtx layout.Context) layout.Dimensions) {
-	offset := op.Affine(f32.Affine2D{}.Offset(f32.Pt(float32(r.Min.X), float32(r.Min.Y)))).Push(gtx.Ops)
-	defer offset.Pop()
+// textInArea draws body at its natural size inside r, vertically centred.
+// Horizontal alignment is delegated to text.Alignment on the body's label
+// because widget.Label clamps its reported height to the constraint Min,
+// which makes layout.Direction.Layout's offset math collapse to zero.
+func textInArea(gtx layout.Context, r image.Rectangle, body func(gtx layout.Context) layout.Dimensions) {
+	macro := op.Record(gtx.Ops)
 	local := gtx
-	local.Constraints = layout.Exact(image.Pt(r.Dx(), r.Dy()))
-	dir.Layout(local, body)
+	local.Constraints = layout.Constraints{Max: image.Pt(r.Dx(), r.Dy())}
+	dims := body(local)
+	call := macro.Stop()
+
+	dy := (r.Dy() - dims.Size.Y) / 2
+	if dy < 0 {
+		dy = 0
+	}
+	offset := op.Affine(f32.Affine2D{}.Offset(f32.Pt(float32(r.Min.X), float32(r.Min.Y+dy)))).Push(gtx.Ops)
+	defer offset.Pop()
+	call.Add(gtx.Ops)
 }
 
 func keyMarker(a domain.Attribute) string {
-	if a.Primary {
-		return "PK"
-	}
-	return ""
+	return a.KeyKind.String()
 }

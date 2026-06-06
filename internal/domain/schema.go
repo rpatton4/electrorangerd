@@ -43,7 +43,34 @@ type Attribute struct {
 	DataType string
 	Nullable bool
 	Default  string
-	Primary  bool
+	KeyKind  KeyKind
+}
+
+// KeyKind identifies the key marker shown alongside an attribute in the ERD:
+// primary key, foreign key, indexed key, or none. The marker is a UI display
+// choice that maps to underlying SQL semantics (PK column, FK constraint,
+// index) when the entity is forward-engineered.
+type KeyKind int
+
+const (
+	KeyNone KeyKind = iota
+	KeyPrimary
+	KeyForeign
+	KeyIndex
+)
+
+// String returns the two-letter marker ("PK", "FK", "IK") or empty for
+// KeyNone, suitable for direct display in an entity row's key column.
+func (k KeyKind) String() string {
+	switch k {
+	case KeyPrimary:
+		return "PK"
+	case KeyForeign:
+		return "FK"
+	case KeyIndex:
+		return "IK"
+	}
+	return ""
 }
 
 // Relationship describes an association between two entities. Crow's foot
