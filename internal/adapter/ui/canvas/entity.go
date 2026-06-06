@@ -3,6 +3,7 @@ package canvas
 import (
 	"image"
 	"image/color"
+	"math"
 
 	"gioui.org/f32"
 	"gioui.org/layout"
@@ -196,13 +197,112 @@ func (c *Canvas) EntitySelection(gtx layout.Context, p EntityPalette, e domain.E
 // points in the selection accent colour. Caller renders the line in the
 // diagram-view coordinate space (no per-entity transform pushed).
 func (c *Canvas) RelationshipLine(gtx layout.Context, p EntityPalette, from, to f32.Point) {
+	width := float32(gtx.Dp(unit.Dp(2)))
+	drawLine(gtx, p.Selection, from, to, width)
+}
+
+// RelationshipMarker draws the crow's-foot cardinality glyph at one end of
+// a relationship line. at is the line endpoint (on the entity edge);
+// towardOther is the line's other endpoint, used to orient the marker so
+// it sits along the line just inside the endpoint. CrowsFootUnspecified
+// renders nothing.
+func (c *Canvas) RelationshipMarker(gtx layout.Context, p EntityPalette, at, towardOther f32.Point, marker domain.CrowsFoot) {
+	if marker == domain.CrowsFootUnspecified {
+		return
+	}
+	dx := towardOther.X - at.X
+	dy := towardOther.Y - at.Y
+	length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+	if length < 1 {
+		return
+	}
+	// unit direction from at toward other endpoint
+	ux := dx / length
+	uy := dy / length
+	// perpendicular (90° CCW)
+	px := -uy
+	py := ux
+
+	lineW := float32(gtx.Dp(unit.Dp(2)))
+	d1 := float32(gtx.Dp(unit.Dp(14)))
+	d2 := float32(gtx.Dp(unit.Dp(26)))
+	perpHalf := float32(gtx.Dp(unit.Dp(7)))
+	crowsDepth := float32(gtx.Dp(unit.Dp(10)))
+	crowsWide := float32(gtx.Dp(unit.Dp(7)))
+	circleR := float32(gtx.Dp(unit.Dp(4)))
+	twinGap := float32(gtx.Dp(unit.Dp(4)))
+
+	perpLineAt := func(d float32) {
+		cx := at.X + ux*d
+		cy := at.Y + uy*d
+		drawLine(gtx, p.Selection,
+			f32.Pt(cx+px*perpHalf, cy+py*perpHalf),
+			f32.Pt(cx-px*perpHalf, cy-py*perpHalf),
+			lineW,
+		)
+	}
+	crowsFootAt := func(d float32) {
+		// Vertex sits at distance d from at; three prongs extend back
+		// toward at, with the outer two prongs angled outward.
+		vx := at.X + ux*d
+		vy := at.Y + uy*d
+		v := f32.Pt(vx, vy)
+		cend := f32.Pt(vx-ux*crowsDepth, vy-uy*crowsDepth)
+		uend := f32.Pt(cend.X+px*crowsWide, cend.Y+py*crowsWide)
+		lend := f32.Pt(cend.X-px*crowsWide, cend.Y-py*crowsWide)
+		drawLine(gtx, p.Selection, v, uend, lineW)
+		drawLine(gtx, p.Selection, v, cend, lineW)
+		drawLine(gtx, p.Selection, v, lend, lineW)
+	}
+	circleAt := func(d float32) {
+		cx := at.X + ux*d
+		cy := at.Y + uy*d
+		drawCircleOutline(gtx, p.Selection, f32.Pt(cx, cy), circleR, lineW)
+	}
+
+	switch marker {
+	case domain.CrowsFootZeroOrOne:
+		perpLineAt(d1)
+		circleAt(d2)
+	case domain.CrowsFootOne:
+		perpLineAt(d1)
+	case domain.CrowsFootZeroOrMany:
+		crowsFootAt(d1)
+		circleAt(d2)
+	case domain.CrowsFootMany:
+		crowsFootAt(d1)
+	case domain.CrowsFootOneAndOnlyOne:
+		perpLineAt(d1)
+		perpLineAt(d1 + twinGap)
+	case domain.CrowsFootOneOrMany:
+		crowsFootAt(d1)
+		perpLineAt(d2)
+	}
+}
+
+func drawLine(gtx layout.Context, col color.NRGBA, from, to f32.Point, width float32) {
 	var path clip.Path
 	path.Begin(gtx.Ops)
 	path.MoveTo(from)
 	path.LineTo(to)
 	spec := path.End()
-	width := float32(gtx.Dp(unit.Dp(2)))
-	paint.FillShape(gtx.Ops, p.Selection, clip.Stroke{Path: spec, Width: width}.Op())
+	paint.FillShape(gtx.Ops, col, clip.Stroke{Path: spec, Width: width}.Op())
+}
+
+func drawCircleOutline(gtx layout.Context, col color.NRGBA, centre f32.Point, radius, width float32) {
+	const kappaC = 0.5522847498307933
+	kappa := radius * kappaC
+	cx, cy := centre.X, centre.Y
+	var path clip.Path
+	path.Begin(gtx.Ops)
+	path.MoveTo(f32.Pt(cx+radius, cy))
+	path.CubeTo(f32.Pt(cx+radius, cy-kappa), f32.Pt(cx+kappa, cy-radius), f32.Pt(cx, cy-radius))
+	path.CubeTo(f32.Pt(cx-kappa, cy-radius), f32.Pt(cx-radius, cy-kappa), f32.Pt(cx-radius, cy))
+	path.CubeTo(f32.Pt(cx-radius, cy+kappa), f32.Pt(cx-kappa, cy+radius), f32.Pt(cx, cy+radius))
+	path.CubeTo(f32.Pt(cx+kappa, cy+radius), f32.Pt(cx+radius, cy+kappa), f32.Pt(cx+radius, cy))
+	path.Close()
+	spec := path.End()
+	paint.FillShape(gtx.Ops, col, clip.Stroke{Path: spec, Width: width}.Op())
 }
 
 func drawHandle(gtx layout.Context, centre image.Point, radius int, col color.NRGBA) {

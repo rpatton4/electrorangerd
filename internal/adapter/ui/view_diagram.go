@@ -81,11 +81,14 @@ type diagramView struct {
 
 	project domain.Project
 
-	menu       *dialog.ContextMenu
-	keyMenu    *dialog.ContextMenu
-	addRowMenu *dialog.ContextMenu
-	rowMenu    *dialog.ContextMenu
-	inputTag   struct{}
+	menu           *dialog.ContextMenu
+	keyMenu        *dialog.ContextMenu
+	addRowMenu     *dialog.ContextMenu
+	rowMenu        *dialog.ContextMenu
+	relDialog      *dialog.Modal
+	sourceDropdown *dialog.Dropdown
+	targetDropdown *dialog.Dropdown
+	inputTag       struct{}
 
 	// Drag state. dragPos is the in-flight ghost position updated every
 	// pointer.Drag event; on Release it is committed through the port via
@@ -120,6 +123,10 @@ type diagramView struct {
 	linkFromHandle int
 	linkCursor     f32.Point
 
+	// Relationship-dialog state. relDialogID is the relationship whose
+	// metadata the modal is currently showing; zero when closed.
+	relDialogID domain.RelationshipID
+
 	lastPressAt  time.Time
 	lastPressPos f32.Point
 }
@@ -140,6 +147,23 @@ func newDiagramView(de port.DiagramEditor, history port.History) *diagramView {
 		keyMenu:    dialog.NewContextMenu("PK", "FK", "IK"),
 		addRowMenu: dialog.NewContextMenu("Add row (a)"),
 		rowMenu:    dialog.NewContextMenu("Add row (a)", "Delete row (d)"),
+		relDialog:  dialog.NewModal("Relationship Details"),
+		sourceDropdown: dialog.NewDropdown("Select cardinality",
+			domain.CrowsFootZeroOrOne.String(),
+			domain.CrowsFootOne.String(),
+			domain.CrowsFootZeroOrMany.String(),
+			domain.CrowsFootMany.String(),
+			domain.CrowsFootOneAndOnlyOne.String(),
+			domain.CrowsFootOneOrMany.String(),
+		),
+		targetDropdown: dialog.NewDropdown("Select cardinality",
+			domain.CrowsFootZeroOrOne.String(),
+			domain.CrowsFootOne.String(),
+			domain.CrowsFootZeroOrMany.String(),
+			domain.CrowsFootMany.String(),
+			domain.CrowsFootOneAndOnlyOne.String(),
+			domain.CrowsFootOneOrMany.String(),
+		),
 	}
 	v.editor.SingleLine = true
 	v.editor.Submit = true
@@ -209,6 +233,17 @@ func (v *diagramView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensi
 		v.rowMenuTarget = editTarget{}
 	}
 
+	saved, cancelled := v.relDialog.Layout(gtx, th, func(gtx layout.Context) layout.Dimensions {
+		return v.layoutRelDialogBody(gtx, th)
+	})
+	if saved {
+		v.saveRelationshipDialog()
+		v.relDialogID = 0
+	}
+	if cancelled {
+		v.relDialogID = 0
+	}
+
 	return layout.Dimensions{Size: gtx.Constraints.Max}
 }
 
@@ -231,6 +266,11 @@ func (v *diagramView) handlePointer(gtx layout.Context) {
 			v.hovering = true
 			if v.linking {
 				v.linkCursor = pe.Position
+			}
+			if v.relDialog.IsOpen() {
+				// Modal eats the press — its scrim and buttons own
+				// every click while it's up.
+				continue
 			}
 			v.onPress(gtx, pe)
 		case pointer.Drag:
@@ -346,7 +386,13 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 
 	isDouble := v.trackPrimaryClick(pe.Position, gtx.Now)
 	if isDouble {
-		v.openSubEditor(gtx, pe.Position)
+		if eID, _ := v.hitEntity(gtx, pe.Position); eID != 0 {
+			v.openSubEditor(gtx, pe.Position)
+			return
+		}
+		if relID, ok := v.hitRelationshipLine(gtx, pe.Position); ok {
+			v.openRelationshipDialog(relID)
+		}
 		return
 	}
 
@@ -409,6 +455,9 @@ func (v *diagramView) handleKeys(gtx layout.Context, allMods key.Modifiers) {
 			}
 		case key.NameEscape:
 			switch {
+			case v.relDialog.IsOpen():
+				v.relDialog.Close()
+				v.relDialogID = 0
 			case v.linking:
 				v.cancelLink()
 			case v.edit.kind != editNone:
@@ -554,6 +603,180 @@ func (v *diagramView) applyKeyMarker(sel int) {
 		v.project = updated
 		v.history.Push(domain.Command{Kind: domain.CmdUpdateEntity, Description: "Set key marker"})
 	}
+}
+
+// hitRelationshipLine returns the ID of the relationship whose currently
+// rendered line is within a forgiving tolerance of p, if any. Used to
+// detect double-click targets on the lines.
+func (v *diagramView) hitRelationshipLine(gtx layout.Context, p f32.Point) (domain.RelationshipID, bool) {
+	tolerance := float32(gtx.Dp(unit.Dp(6)))
+	tol2 := tolerance * tolerance
+	for _, rel := range v.project.Relationships {
+		fromEnt, _, _, ok := domain.FindEntity(v.project, rel.From.Entity)
+		if !ok {
+			continue
+		}
+		toEnt, _, _, ok := domain.FindEntity(v.project, rel.To.Entity)
+		if !ok {
+			continue
+		}
+		fromPos, ok := v.entityPosition(rel.From.Entity)
+		if !ok {
+			continue
+		}
+		toPos, ok := v.entityPosition(rel.To.Entity)
+		if !ok {
+			continue
+		}
+		fh, th := v.nearestHandlePair(gtx, fromEnt, fromPos, toEnt, toPos)
+		fx, fy := canvas.HandlePosition(gtx, fromEnt, fh)
+		tx, ty := canvas.HandlePosition(gtx, toEnt, th)
+		a := f32.Pt(fromPos.X+fx, fromPos.Y+fy)
+		b := f32.Pt(toPos.X+tx, toPos.Y+ty)
+		if distanceSquaredToSegment(p, a, b) <= tol2 {
+			return rel.ID, true
+		}
+	}
+	return 0, false
+}
+
+// distanceSquaredToSegment returns the squared distance from p to the
+// line segment a→b. Uses the standard projection-clamp formulation.
+func distanceSquaredToSegment(p, a, b f32.Point) float32 {
+	abx := b.X - a.X
+	aby := b.Y - a.Y
+	ab2 := abx*abx + aby*aby
+	if ab2 == 0 {
+		dx := p.X - a.X
+		dy := p.Y - a.Y
+		return dx*dx + dy*dy
+	}
+	apx := p.X - a.X
+	apy := p.Y - a.Y
+	t := (apx*abx + apy*aby) / ab2
+	if t < 0 {
+		t = 0
+	} else if t > 1 {
+		t = 1
+	}
+	cx := a.X + abx*t
+	cy := a.Y + aby*t
+	dx := p.X - cx
+	dy := p.Y - cy
+	return dx*dx + dy*dy
+}
+
+// crowsFootOptions enumerates the 6 dropdown choices in the order they
+// appear in the dialog. It is the source of truth for the index-to-enum
+// mapping used by both Open (initialising dropdowns) and Save (reading
+// them back).
+var crowsFootOptions = []domain.CrowsFoot{
+	domain.CrowsFootZeroOrOne,
+	domain.CrowsFootOne,
+	domain.CrowsFootZeroOrMany,
+	domain.CrowsFootMany,
+	domain.CrowsFootOneAndOnlyOne,
+	domain.CrowsFootOneOrMany,
+}
+
+func indexOfCrowsFoot(cf domain.CrowsFoot) int {
+	for i, opt := range crowsFootOptions {
+		if opt == cf {
+			return i
+		}
+	}
+	return -1
+}
+
+func crowsFootFromIndex(i int) domain.CrowsFoot {
+	if i < 0 || i >= len(crowsFootOptions) {
+		return domain.CrowsFootUnspecified
+	}
+	return crowsFootOptions[i]
+}
+
+// openRelationshipDialog targets the modal at the given relationship and
+// shows it. The source / target dropdowns are pre-selected to match the
+// relationship's current cardinalities so the user can edit from the
+// existing state.
+func (v *diagramView) openRelationshipDialog(id domain.RelationshipID) {
+	rel, _, ok := domain.FindRelationship(v.project, id)
+	if !ok {
+		return
+	}
+	v.menu.Close()
+	v.keyMenu.Close()
+	v.addRowMenu.Close()
+	v.rowMenu.Close()
+	v.sourceDropdown.Close()
+	v.targetDropdown.Close()
+	v.cancelLink()
+	v.sourceDropdown.SetSelected(indexOfCrowsFoot(rel.SourceCardinality))
+	v.targetDropdown.SetSelected(indexOfCrowsFoot(rel.TargetCardinality))
+	v.relDialogID = id
+	v.relDialog.Open()
+}
+
+// saveRelationshipDialog reads the dropdown selections and pushes the
+// updated cardinalities through the DiagramEditor, replacing v.project on
+// success and pushing a CmdUpdateRelationship onto history.
+func (v *diagramView) saveRelationshipDialog() {
+	rel, _, ok := domain.FindRelationship(v.project, v.relDialogID)
+	if !ok {
+		return
+	}
+	rel.SourceCardinality = crowsFootFromIndex(v.sourceDropdown.Selected())
+	rel.TargetCardinality = crowsFootFromIndex(v.targetDropdown.Selected())
+	updated, err := v.diagramEditor.UpdateRelationship(context.TODO(), v.project, v.relDialogID, rel)
+	if err != nil {
+		return
+	}
+	v.project = updated
+	v.history.Push(domain.Command{Kind: domain.CmdUpdateRelationship, Description: "Update relationship cardinalities"})
+}
+
+// layoutRelDialogBody renders the modal's middle content as a 3-column
+// row: column 1 holds the source name and dropdown, column 2 the word
+// "to" centred vertically against the dropdowns, column 3 the target
+// name and dropdown.
+func (v *diagramView) layoutRelDialogBody(gtx layout.Context, th *theme.Theme) layout.Dimensions {
+	sourceName, targetName := "", ""
+	if rel, _, ok := domain.FindRelationship(v.project, v.relDialogID); ok {
+		if ent, _, _, ok := domain.FindEntity(v.project, rel.From.Entity); ok {
+			sourceName = ent.Name
+		}
+		if ent, _, _, ok := domain.FindEntity(v.project, rel.To.Entity); ok {
+			targetName = ent.Name
+		}
+	}
+	column := func(name string, dd *dialog.Dropdown) layout.Widget {
+		return func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(material.Body1(th.Material, name).Layout),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return dd.Layout(gtx, th)
+				}),
+			)
+		}
+	}
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+		layout.Flexed(1, column("Source: "+sourceName, v.sourceDropdown)),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			// Align "to" vertically with the dropdown bar by mirroring
+			// the column's "name + spacer" prefix height.
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(material.Body1(th.Material, "").Layout),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.UniformInset(unit.Dp(8)).Layout(gtx, material.Body1(th.Material, "to").Layout)
+				}),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+		layout.Flexed(1, column("Target: "+targetName, v.targetDropdown)),
+	)
 }
 
 // hitHandle reports the selected entity's handle index at p, if any, with
@@ -704,10 +927,11 @@ func (v *diagramView) layoutRelationships(gtx layout.Context, palette canvas.Ent
 		fh, th := v.nearestHandlePair(gtx, fromEnt, fromPos, toEnt, toPos)
 		fx, fy := canvas.HandlePosition(gtx, fromEnt, fh)
 		tx, ty := canvas.HandlePosition(gtx, toEnt, th)
-		v.canvas.RelationshipLine(gtx, palette,
-			f32.Pt(fromPos.X+fx, fromPos.Y+fy),
-			f32.Pt(toPos.X+tx, toPos.Y+ty),
-		)
+		from := f32.Pt(fromPos.X+fx, fromPos.Y+fy)
+		to := f32.Pt(toPos.X+tx, toPos.Y+ty)
+		v.canvas.RelationshipLine(gtx, palette, from, to)
+		v.canvas.RelationshipMarker(gtx, palette, from, to, rel.SourceCardinality)
+		v.canvas.RelationshipMarker(gtx, palette, to, from, rel.TargetCardinality)
 	}
 }
 

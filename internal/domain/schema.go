@@ -111,20 +111,18 @@ type RelationshipEndpoint struct {
 	Attribute string
 }
 
-// Relationship describes an association between two entities. Crow's foot
-// notation requires cardinality and optionality at each endpoint as
-// independent axes. Provenance records whether the relationship was declared
-// explicitly, inferred by reverse-engineering heuristics, or added manually.
-// ID is the project-unique stable identifier.
+// Relationship describes an association between two entities. Each endpoint
+// carries a CrowsFoot marker that combines cardinality and optionality into
+// the single label the editor exposes to the user. Provenance records how
+// the relationship entered the model. ID is the project-unique stable
+// identifier.
 type Relationship struct {
 	ID                RelationshipID
 	Name              string
 	From              RelationshipEndpoint
 	To                RelationshipEndpoint
-	SourceCardinality Cardinality
-	SourceOptionality Optionality
-	TargetCardinality Cardinality
-	TargetOptionality Optionality
+	SourceCardinality CrowsFoot
+	TargetCardinality CrowsFoot
 	OnDelete          string
 	OnUpdate          string
 	Provenance        Provenance
@@ -139,23 +137,42 @@ type EntityRef struct {
 	Attribute string
 }
 
-// Cardinality is one half of a crow's foot endpoint marker — how many of
-// the related entity participate in the relationship.
-type Cardinality int
+// CrowsFoot identifies the cardinality marker at one end of a Relationship
+// using crow's-foot notation. Together with the matching marker on the
+// other endpoint it tells the renderer which glyphs to draw at the line
+// end nearest the entity. The unspecified value (zero) renders as a plain
+// line end with no markers.
+type CrowsFoot int
 
 const (
-	CardinalityOne Cardinality = iota
-	CardinalityMany
+	CrowsFootUnspecified CrowsFoot = iota
+	CrowsFootZeroOrOne
+	CrowsFootOne
+	CrowsFootZeroOrMany
+	CrowsFootMany
+	CrowsFootOneAndOnlyOne
+	CrowsFootOneOrMany
 )
 
-// Optionality is the other half of a crow's foot endpoint marker — whether
-// participation in the relationship is required or optional.
-type Optionality int
-
-const (
-	OptionalityRequired Optionality = iota
-	OptionalityOptional
-)
+// String returns the human-readable label used in the relationship-details
+// dropdown.
+func (c CrowsFoot) String() string {
+	switch c {
+	case CrowsFootZeroOrOne:
+		return "Zero or One"
+	case CrowsFootOne:
+		return "One"
+	case CrowsFootZeroOrMany:
+		return "Zero or Many"
+	case CrowsFootMany:
+		return "Many"
+	case CrowsFootOneAndOnlyOne:
+		return "One and only One"
+	case CrowsFootOneOrMany:
+		return "One or Many"
+	}
+	return ""
+}
 
 // Provenance records where a Relationship came from. Inferred relationships
 // surface a confidence score and a human-readable reason so the reverse-
