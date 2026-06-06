@@ -6,6 +6,7 @@ import (
 	"gioui.org/widget/material"
 
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/dialog"
+	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
 )
 
@@ -27,12 +28,12 @@ func newForwardView(fwd port.ForwardEngineer) *forwardView {
 	}
 }
 
-func (v *forwardView) Layout(gtx layout.Context, th *material.Theme) layout.Dimensions {
+func (v *forwardView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensions {
 	return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(material.H4(th, "Forward Engineering").Layout),
+			layout.Rigid(material.H4(th.Material, "Forward Engineering").Layout),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-			layout.Rigid(material.Body2(th, "Review the migration plan before pushing to a target database.").Layout),
+			layout.Rigid(material.Body2(th.Material, "Review the migration plan before pushing to a target database.").Layout),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return v.drawer.Layout(gtx, th)

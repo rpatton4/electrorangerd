@@ -7,6 +7,7 @@ import (
 	"gioui.org/x/markdown"
 	"gioui.org/x/richtext"
 
+	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
 )
 
@@ -51,21 +52,21 @@ func (v *dictionaryView) rebuild() {
 	}
 }
 
-func (v *dictionaryView) Layout(gtx layout.Context, th *material.Theme) layout.Dimensions {
+func (v *dictionaryView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensions {
 	if len(v.cached) == 0 {
 		v.rebuild()
 	}
 	return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(material.H4(th, "Data Dictionary").Layout),
+			layout.Rigid(material.H4(th.Material, "Data Dictionary").Layout),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-			layout.Rigid(material.Body2(th, "Descriptions are authored in Markdown and rendered via gioui.org/x/markdown.").Layout),
+			layout.Rigid(material.Body2(th.Material, "Descriptions are authored in Markdown and rendered via gioui.org/x/markdown.").Layout),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if len(v.cached) == 0 {
-					return material.Body2(th, "(no entry selected)").Layout(gtx)
+					return material.Body2(th.Material, "(no entry selected)").Layout(gtx)
 				}
-				return richtext.Text(&v.richtextState, th.Shaper, v.cached...).Layout(gtx)
+				return richtext.Text(&v.richtextState, th.Material.Shaper, v.cached...).Layout(gtx)
 			}),
 		)
 	})

@@ -2,7 +2,6 @@ package dialog
 
 import (
 	"image"
-	"image/color"
 	"time"
 
 	"gioui.org/f32"
@@ -13,6 +12,8 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+
+	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
 )
 
 // drawerDuration is how long the open/close animation takes end to end.
@@ -31,7 +32,7 @@ type Drawer struct {
 }
 
 // Layout draws the drawer.
-func (d *Drawer) Layout(gtx layout.Context, th *material.Theme) layout.Dimensions {
+func (d *Drawer) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensions {
 	if d.Click.Clicked(gtx) {
 		d.toggle()
 	}
@@ -44,7 +45,7 @@ func (d *Drawer) Layout(gtx layout.Context, th *material.Theme) layout.Dimension
 	return material.Clickable(gtx, &d.Click, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.UniformInset(unit.Dp(12)).Layout(gtx, material.Body1(th, d.Title).Layout)
+				return layout.UniformInset(unit.Dp(12)).Layout(gtx, material.Body1(th.Material, d.Title).Layout)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return d.drawerBody(gtx, th, progress)
@@ -55,7 +56,7 @@ func (d *Drawer) Layout(gtx layout.Context, th *material.Theme) layout.Dimension
 
 // drawerBody clips the body to a translate-Y animation. At progress 0 the
 // body height is zero; at progress 1 the body is fully revealed.
-func (d *Drawer) drawerBody(gtx layout.Context, th *material.Theme, progress float32) layout.Dimensions {
+func (d *Drawer) drawerBody(gtx layout.Context, th *theme.Theme, progress float32) layout.Dimensions {
 	const fullBodyHeightDp = 96
 	fullBody := gtx.Dp(unit.Dp(fullBodyHeightDp))
 	visible := int(float32(fullBody) * progress)
@@ -71,14 +72,13 @@ func (d *Drawer) drawerBody(gtx layout.Context, th *material.Theme, progress flo
 	offset := op.Affine(f32.Affine2D{}.Offset(f32.Pt(0, float32(visible-fullBody)))).Push(gtx.Ops)
 	defer offset.Pop()
 
-	bg := color.NRGBA{R: 0x12, G: 0x14, B: 0x1C, A: 0xFF}
 	bgRect := clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, fullBody)}.Push(gtx.Ops)
-	paint.ColorOp{Color: bg}.Add(gtx.Ops)
+	paint.ColorOp{Color: th.SurfaceContainer}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	bgRect.Pop()
 
 	inset := layout.UniformInset(unit.Dp(12))
-	inset.Layout(gtx, material.Body2(th, d.Body).Layout)
+	inset.Layout(gtx, material.Body2(th.Material, d.Body).Layout)
 
 	return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, visible)}
 }

@@ -8,6 +8,8 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+
+	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
 )
 
 // welcomeView is the initial post-unlock chooser. It renders one button per
@@ -23,7 +25,7 @@ func newWelcomeView(onSelect func(Mode)) *welcomeView {
 	return &welcomeView{onSelect: onSelect}
 }
 
-func (v *welcomeView) Layout(gtx layout.Context, th *material.Theme) layout.Dimensions {
+func (v *welcomeView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensions {
 	for i, m := range allModes {
 		if v.clicks[i].Clicked(gtx) {
 			v.onSelect(m)
@@ -38,7 +40,7 @@ func (v *welcomeView) Layout(gtx layout.Context, th *material.Theme) layout.Dime
 		loose := gtx
 		loose.Constraints.Min = image.Point{}
 		macro := op.Record(gtx.Ops)
-		dims := material.Button(th, &v.clicks[i], m.Label()).Layout(loose)
+		dims := material.Button(th.Material, &v.clicks[i], m.Label()).Layout(loose)
 		macro.Stop()
 		if dims.Size.X > maxSize.X {
 			maxSize.X = dims.Size.X
@@ -58,7 +60,7 @@ func (v *welcomeView) Layout(gtx layout.Context, th *material.Theme) layout.Dime
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min = maxSize
 				gtx.Constraints.Max.X = maxSize.X
-				return material.Button(th, &v.clicks[i], m.Label()).Layout(gtx)
+				return material.Button(th.Material, &v.clicks[i], m.Label()).Layout(gtx)
 			}))
 		}
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx, children...)

@@ -5,6 +5,7 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget/material"
 
+	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
 )
 
@@ -19,12 +20,12 @@ func newReverseView(rev port.ReverseEngineer) *reverseView {
 	return &reverseView{reverse: rev}
 }
 
-func (v *reverseView) Layout(gtx layout.Context, th *material.Theme) layout.Dimensions {
+func (v *reverseView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensions {
 	return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(material.H4(th, "Reverse Engineering").Layout),
+			layout.Rigid(material.H4(th.Material, "Reverse Engineering").Layout),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-			layout.Rigid(material.Body2(th, "Build an ER diagram from a live PostgreSQL data source. Inferred relationships will appear with Provenance metadata for review.").Layout),
+			layout.Rigid(material.Body2(th.Material, "Build an ER diagram from a live PostgreSQL data source. Inferred relationships will appear with Provenance metadata for review.").Layout),
 		)
 	})
 }

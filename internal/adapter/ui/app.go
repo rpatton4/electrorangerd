@@ -17,6 +17,7 @@ import (
 	"gioui.org/widget/material"
 
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/panel"
+	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
 )
 
@@ -52,7 +53,7 @@ type App struct {
 
 	// Infrastructure.
 	log   *slog.Logger
-	theme *Theme
+	theme *theme.Theme
 
 	// Password gate.
 	password *passwordView
@@ -89,6 +90,7 @@ func NewApp(
 	dictionaryHist port.History,
 	dict port.DictionaryService,
 	vault port.Vault,
+	th *theme.Theme,
 	log *slog.Logger,
 ) *App {
 	a := &App{
@@ -102,7 +104,7 @@ func NewApp(
 		diagramHistory:    diagramHist,
 		dictionaryHistory: dictionaryHist,
 		log:               log,
-		theme:             NewTheme(),
+		theme:             th,
 		mode:              ModeDiagram,
 		screen:            screenWelcome,
 	}
@@ -150,7 +152,7 @@ func (a *App) loop(w *app.Window) error {
 // views are constructed on the first frame, and dispatches to the current
 // screen (welcome chooser, password gate, or mode shell).
 func (a *App) frame(gtx layout.Context) {
-	a.fillBackground(gtx, color.NRGBA{R: 0x0A, G: 0x0B, B: 0x10, A: 0xFF})
+	a.fillBackground(gtx, a.theme.Surface)
 
 	if a.password == nil {
 		a.initViews()
@@ -166,9 +168,9 @@ func (a *App) frame(gtx layout.Context) {
 
 	switch a.screen {
 	case screenWelcome:
-		a.welcomeView.Layout(gtx, a.theme.Material)
+		a.welcomeView.Layout(gtx, a.theme)
 	case screenPassword:
-		a.password.Layout(gtx, a.theme.Material)
+		a.password.Layout(gtx, a.theme)
 	case screenMode:
 		layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -180,7 +182,7 @@ func (a *App) frame(gtx layout.Context) {
 						return a.layoutCurrentView(gtx)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.peek.Layout(gtx, a.theme.Material)
+						return a.peek.Layout(gtx, a.theme)
 					}),
 				)
 			}),
@@ -265,16 +267,15 @@ func (a *App) layoutModeNav(gtx layout.Context) layout.Dimensions {
 }
 
 func (a *App) layoutCurrentView(gtx layout.Context) layout.Dimensions {
-	th := a.theme.Material
 	switch a.mode {
 	case ModeDiagram:
-		return a.diagramView.Layout(gtx, th)
+		return a.diagramView.Layout(gtx, a.theme)
 	case ModeForward:
-		return a.forwardView.Layout(gtx, th)
+		return a.forwardView.Layout(gtx, a.theme)
 	case ModeDictionary:
-		return a.dictionaryView.Layout(gtx, th)
+		return a.dictionaryView.Layout(gtx, a.theme)
 	case ModeReverse:
-		return a.reverseView.Layout(gtx, th)
+		return a.reverseView.Layout(gtx, a.theme)
 	}
 	return layout.Dimensions{}
 }

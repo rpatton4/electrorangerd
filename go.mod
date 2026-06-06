@@ -10,6 +10,7 @@ require (
 require (
 	gioui.org/shader v1.0.8 // indirect
 	gioui.org/x v0.10.0 // indirect
+	git.wow.st/gmp/jni v0.0.0-20210610011705-34026c7e22d0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/go-text/typesetting v0.3.4 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect

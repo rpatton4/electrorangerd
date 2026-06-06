@@ -5,13 +5,17 @@ import (
 	"log/slog"
 	"os"
 
+	pref "gioui.org/x/pref/theme"
+
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/config"
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/flyway"
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/postgres"
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/projectfile"
 	ui "github.com/InfiniteSkye/electrorangerd/internal/adapter/ui"
+	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
 	vaultadapter "github.com/InfiniteSkye/electrorangerd/internal/adapter/vault"
 	"github.com/InfiniteSkye/electrorangerd/internal/core"
+	"github.com/InfiniteSkye/electrorangerd/internal/domain"
 )
 
 func main() {
@@ -31,6 +35,12 @@ func main() {
 	flyWriter := flyway.NewWriter(logger)
 	projStore := projectfile.New(logger)
 	cfgStore := config.New(logger)
+	cfg, err := cfgStore.Load()
+	if err != nil {
+		logger.Warn("config load failed, using defaults", "err", err)
+		cfg = domain.Config{}
+	}
+	th := pickTheme(cfg)
 
 	vaultStore, err := vaultadapter.NewStore(logger)
 	if err != nil {
@@ -56,9 +66,27 @@ func main() {
 	project := core.NewProjectService(projStore, nil, cfgStore, logger)
 	dictionarySvc := core.NewDictionaryService(nil, logger)
 
-	application := ui.NewApp(forward, reverse, drift, project, validator, diagramHistory, dictionaryHistory, dictionarySvc, vault, logger)
+	application := ui.NewApp(forward, reverse, drift, project, validator, diagramHistory, dictionaryHistory, dictionarySvc, vault, th, logger)
 	if err := application.Run(); err != nil {
 		logger.Error("application run", "err", err)
 		os.Exit(1)
 	}
+}
+
+// pickTheme resolves the active UI theme. An explicit ThemeName in config
+// wins; otherwise we follow the OS dark/light preference, defaulting to
+// Black and Chrome on unsupported platforms or when the API errors.
+func pickTheme(cfg domain.Config) *theme.Theme {
+	switch cfg.ThemeName {
+	case "light":
+		return theme.NewLightTheme()
+	case "dark":
+		return theme.NewDarkTheme()
+	case "black-and-chrome":
+		return theme.NewBlackAndChromeTheme()
+	}
+	if dark, err := pref.IsDarkMode(); err == nil && !dark {
+		return theme.NewLightTheme()
+	}
+	return theme.NewBlackAndChromeTheme()
 }

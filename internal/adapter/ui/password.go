@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"errors"
-	"image/color"
 	"log/slog"
 
 	"gioui.org/font"
@@ -13,6 +12,7 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
+	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
 	"github.com/InfiniteSkye/electrorangerd/internal/domain"
 	"github.com/InfiniteSkye/electrorangerd/internal/errs"
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
@@ -86,7 +86,7 @@ func (v *passwordView) Done() bool {
 
 // Layout draws the appropriate prompt for the current phase. It returns
 // layout.Dimensions{} when the view should not be drawn (Done == true).
-func (v *passwordView) Layout(gtx layout.Context, th *material.Theme) layout.Dimensions {
+func (v *passwordView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensions {
 	if v.phase == pwPhaseUnlocked {
 		return layout.Dimensions{}
 	}
@@ -127,22 +127,22 @@ func (v *passwordView) Layout(gtx layout.Context, th *material.Theme) layout.Dim
 		gtx.Constraints.Max.X = gtx.Dp(unit.Dp(480))
 		return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(material.H5(th, title).Layout),
+				layout.Rigid(material.H5(th.Material, title).Layout),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(material.Body2(th, help).Layout),
+				layout.Rigid(material.Body2(th.Material, help).Layout),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return v.layoutEditor(gtx, th)
 				}),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-				layout.Rigid(material.Button(th, &v.submit, button).Layout),
+				layout.Rigid(material.Button(th.Material, &v.submit, button).Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if v.lastErr == "" {
 						return layout.Dimensions{}
 					}
-					return layout.Inset{Top: unit.Dp(12)}.Layout(gtx,
-						material.Body2(th, v.lastErr).Layout,
-					)
+					errLbl := material.Body2(th.Material, v.lastErr)
+					errLbl.Color = th.Error
+					return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, errLbl.Layout)
 				}),
 			)
 		})
@@ -153,30 +153,30 @@ func (v *passwordView) Layout(gtx layout.Context, th *material.Theme) layout.Dim
 // focus-aware accent on the border, and an italic "master password" hint
 // overlaid on the editor when the field is empty. The hint disappears as
 // soon as the user types and reappears if they clear the field.
-func (v *passwordView) layoutEditor(gtx layout.Context, th *material.Theme) layout.Dimensions {
-	borderColor := color.NRGBA{R: 0x4A, G: 0x4B, B: 0x58, A: 0xFF}
+func (v *passwordView) layoutEditor(gtx layout.Context, th *theme.Theme) layout.Dimensions {
+	borderColor := th.Outline
 	if gtx.Focused(&v.editor) {
-		borderColor = color.NRGBA{R: 0x7F, G: 0x9C, B: 0xF4, A: 0xFF}
+		borderColor = th.Primary
 	}
 	border := widget.Border{
 		Color:        borderColor,
-		Width:        unit.Dp(1),
-		CornerRadius: unit.Dp(4),
+		Width:        th.Sizes.StrokeThin,
+		CornerRadius: th.Sizes.RadiusSM,
 	}
 	return border.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Stack{}.Layout(gtx,
 				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-					ed := material.Editor(th, &v.editor, "")
+					ed := material.Editor(th.Material, &v.editor, "")
 					return ed.Layout(gtx)
 				}),
 				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 					if v.editor.Text() != "" {
 						return layout.Dimensions{}
 					}
-					hint := material.Body1(th, "master password")
+					hint := material.Body1(th.Material, "master password")
 					hint.Font.Style = font.Italic
-					hint.Color = color.NRGBA{R: 0x7A, G: 0x7B, B: 0x85, A: 0xFF}
+					hint.Color = th.OnSurfaceVariant
 					return hint.Layout(gtx)
 				}),
 			)

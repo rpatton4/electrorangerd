@@ -14,4 +14,7 @@ type WindowState struct {
 type Config struct {
 	RecentFiles []string
 	Window      WindowState
+	// ThemeName selects the UI theme. Valid values: "" (follow OS preference),
+	// "dark", or "light". Unknown values fall back to OS / dark default.
+	ThemeName string
 }
