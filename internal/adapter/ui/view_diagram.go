@@ -85,6 +85,7 @@ type diagramView struct {
 	keyMenu        *dialog.ContextMenu
 	addRowMenu     *dialog.ContextMenu
 	rowMenu        *dialog.ContextMenu
+	relMenu        *dialog.ContextMenu
 	relDialog      *dialog.Modal
 	sourceDropdown *dialog.Dropdown
 	targetDropdown *dialog.Dropdown
@@ -113,6 +114,11 @@ type diagramView struct {
 	// because it's a view concern, not a project-state concern. Zero
 	// means no selection.
 	selected domain.EntityID
+
+	// selectedRel identifies the currently selected relationship line.
+	// Mutually exclusive with selected: clicking one clears the other.
+	// Zero means no relationship is selected.
+	selectedRel domain.RelationshipID
 
 	// Relationship-drawing state. Active between a click on a handle of
 	// the selected entity and the next click. linkCursor follows the
@@ -147,6 +153,7 @@ func newDiagramView(de port.DiagramEditor, history port.History) *diagramView {
 		keyMenu:    dialog.NewContextMenu("PK", "FK", "IK"),
 		addRowMenu: dialog.NewContextMenu("Add row (a)"),
 		rowMenu:    dialog.NewContextMenu("Add row (a)", "Delete row (d)"),
+		relMenu:    dialog.NewContextMenu("Remove (del)"),
 		relDialog:  dialog.NewModal("Relationship Details"),
 		sourceDropdown: dialog.NewDropdown("Select cardinality",
 			domain.CrowsFootZeroOrOne.String(),
@@ -231,6 +238,9 @@ func (v *diagramView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensi
 			v.deleteRow(gtx, v.rowMenuTarget.entityID, v.rowMenuTarget.attrIdx)
 		}
 		v.rowMenuTarget = editTarget{}
+	}
+	if sel := v.relMenu.Layout(gtx, th); sel == 0 {
+		v.deleteRelationship(v.selectedRel)
 	}
 
 	saved, cancelled := v.relDialog.Layout(gtx, th, func(gtx layout.Context) layout.Dimensions {
@@ -329,13 +339,21 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 		v.menu.Close()
 		v.addRowMenu.Close()
 		v.rowMenu.Close()
+		v.relMenu.Close()
 		// Right-click is contextual: on a row of an entity it offers
 		// Add row + Delete row; on an entity's header it offers Add row
-		// only; on empty diagram space it offers Create Entity.
+		// only; on a relationship line it offers Remove; on empty
+		// diagram space it offers Create Entity.
 		eID, sub, aIdx := v.hitSubArea(gtx, pe.Position)
 		switch {
 		case eID == 0:
-			v.menu.Open(at)
+			if relID, ok := v.hitRelationshipLine(gtx, pe.Position); ok {
+				v.selectedRel = relID
+				v.selected = 0
+				v.relMenu.Open(at)
+			} else {
+				v.menu.Open(at)
+			}
 		case sub == subKeyMarker || sub == subAttrName:
 			v.rowMenuTarget = editTarget{entityID: eID, attrIdx: aIdx}
 			v.rowMenu.Open(at)
@@ -353,7 +371,7 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 	// scrim handles off-menu dismissal and its items handle selection —
 	// closing it from this handler would short-circuit those drains in the
 	// same frame and drop the click on the floor.
-	if v.menu.IsOpen() || v.keyMenu.IsOpen() || v.addRowMenu.IsOpen() || v.rowMenu.IsOpen() {
+	if v.menu.IsOpen() || v.keyMenu.IsOpen() || v.addRowMenu.IsOpen() || v.rowMenu.IsOpen() || v.relMenu.IsOpen() {
 		return
 	}
 
@@ -398,6 +416,7 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 
 	if id, hit := v.hitEntity(gtx, pe.Position); hit {
 		v.selected = id
+		v.selectedRel = 0
 		pos, _ := v.project.Diagram.Placements[id]
 		v.dragging = true
 		v.dragID = id
@@ -406,8 +425,12 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 			X: pe.Position.X - pos.X,
 			Y: pe.Position.Y - pos.Y,
 		}
+	} else if relID, ok := v.hitRelationshipLine(gtx, pe.Position); ok {
+		v.selected = 0
+		v.selectedRel = relID
 	} else {
 		v.selected = 0
+		v.selectedRel = 0
 	}
 }
 
@@ -418,6 +441,8 @@ func (v *diagramView) handleKeys(gtx layout.Context, allMods key.Modifiers) {
 			key.Filter{Name: "A", Optional: allMods},
 			key.Filter{Name: "D", Optional: allMods},
 			key.Filter{Name: key.NameEscape, Optional: allMods},
+			key.Filter{Name: key.NameDeleteForward, Optional: allMods},
+			key.Filter{Name: key.NameDeleteBackward, Optional: allMods},
 		)
 		if !ok {
 			break
@@ -453,6 +478,13 @@ func (v *diagramView) handleKeys(gtx layout.Context, allMods key.Modifiers) {
 					v.deleteRow(gtx, eID, aIdx)
 				}
 			}
+		case key.NameDeleteForward, key.NameDeleteBackward:
+			// Delete / Backspace removes the currently-selected
+			// relationship. While editing, defer to the inline editor
+			// so the user can edit text normally.
+			if v.edit.kind == editNone && ke.Modifiers == 0 && v.selectedRel != 0 {
+				v.deleteRelationship(v.selectedRel)
+			}
 		case key.NameEscape:
 			switch {
 			case v.relDialog.IsOpen():
@@ -470,6 +502,8 @@ func (v *diagramView) handleKeys(gtx layout.Context, allMods key.Modifiers) {
 				v.addRowMenu.Close()
 			case v.rowMenu.IsOpen():
 				v.rowMenu.Close()
+			case v.relMenu.IsOpen():
+				v.relMenu.Close()
 			}
 		}
 	}
@@ -603,6 +637,24 @@ func (v *diagramView) applyKeyMarker(sel int) {
 		v.project = updated
 		v.history.Push(domain.Command{Kind: domain.CmdUpdateEntity, Description: "Set key marker"})
 	}
+}
+
+// deleteRelationship removes the relationship at id via the
+// DiagramEditor port, clears the selection if it pointed at the deleted
+// relationship, and records a CmdRemoveRelationship history entry.
+func (v *diagramView) deleteRelationship(id domain.RelationshipID) {
+	if id == 0 {
+		return
+	}
+	updated, err := v.diagramEditor.DeleteRelationship(context.TODO(), v.project, id)
+	if err != nil {
+		return
+	}
+	v.project = updated
+	if v.selectedRel == id {
+		v.selectedRel = 0
+	}
+	v.history.Push(domain.Command{Kind: domain.CmdRemoveRelationship, Description: "Remove relationship"})
 }
 
 // hitRelationshipLine returns the ID of the relationship whose currently
@@ -929,7 +981,7 @@ func (v *diagramView) layoutRelationships(gtx layout.Context, palette canvas.Ent
 		tx, ty := canvas.HandlePosition(gtx, toEnt, th)
 		from := f32.Pt(fromPos.X+fx, fromPos.Y+fy)
 		to := f32.Pt(toPos.X+tx, toPos.Y+ty)
-		v.canvas.RelationshipLine(gtx, palette, from, to)
+		v.canvas.RelationshipLine(gtx, palette, from, to, v.selectedRel == rel.ID)
 		v.canvas.RelationshipMarker(gtx, palette, from, to, rel.SourceCardinality)
 		v.canvas.RelationshipMarker(gtx, palette, to, from, rel.TargetCardinality)
 	}
@@ -950,6 +1002,7 @@ func (v *diagramView) layoutLinkInFlight(gtx layout.Context, palette canvas.Enti
 	v.canvas.RelationshipLine(gtx, palette,
 		f32.Pt(pos.X+hx, pos.Y+hy),
 		v.linkCursor,
+		false,
 	)
 }
 

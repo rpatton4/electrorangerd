@@ -194,10 +194,15 @@ func (c *Canvas) EntitySelection(gtx layout.Context, p EntityPalette, e domain.E
 }
 
 // RelationshipLine draws a single straight line between two screen-space
-// points in the selection accent colour. Caller renders the line in the
-// diagram-view coordinate space (no per-entity transform pushed).
-func (c *Canvas) RelationshipLine(gtx layout.Context, p EntityPalette, from, to f32.Point) {
+// points in the selection accent colour. When bold is true the stroke is
+// thicker, which the diagram view uses to mark the currently-selected
+// relationship. Caller renders the line in the diagram-view coordinate
+// space (no per-entity transform pushed).
+func (c *Canvas) RelationshipLine(gtx layout.Context, p EntityPalette, from, to f32.Point, bold bool) {
 	width := float32(gtx.Dp(unit.Dp(2)))
+	if bold {
+		width = float32(gtx.Dp(unit.Dp(4)))
+	}
 	drawLine(gtx, p.Selection, from, to, width)
 }
 
