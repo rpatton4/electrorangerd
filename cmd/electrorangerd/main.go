@@ -65,8 +65,9 @@ func main() {
 	// nil DictionaryStore: real on-disk persistence lands when adapter/dictionaryfile is added.
 	project := core.NewProjectService(projStore, nil, cfgStore, logger)
 	dictionarySvc := core.NewDictionaryService(nil, logger)
+	diagramEditor := core.NewDiagramEditor(logger)
 
-	application := ui.NewApp(forward, reverse, drift, project, validator, diagramHistory, dictionaryHistory, dictionarySvc, vault, th, logger)
+	application := ui.NewApp(forward, reverse, drift, project, validator, diagramHistory, dictionaryHistory, dictionarySvc, diagramEditor, vault, th, logger)
 	if err := application.Run(); err != nil {
 		logger.Error("application run", "err", err)
 		os.Exit(1)

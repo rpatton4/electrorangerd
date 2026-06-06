@@ -40,13 +40,14 @@ const (
 // constructed after the vault unlocks.
 type App struct {
 	// Service ports.
-	forward    port.ForwardEngineer
-	reverse    port.ReverseEngineer
-	drift      port.DriftDetector
-	project    port.ProjectService
-	validator  port.Validator
-	dictionary port.DictionaryService
-	vault      port.Vault
+	forward       port.ForwardEngineer
+	reverse       port.ReverseEngineer
+	drift         port.DriftDetector
+	project       port.ProjectService
+	validator     port.Validator
+	dictionary    port.DictionaryService
+	diagramEditor port.DiagramEditor
+	vault         port.Vault
 
 	// Per-mode History stacks. Forward and reverse engineering do not have
 	// undo/redo — they are one-shot operations, not edit sessions.
@@ -93,6 +94,7 @@ func NewApp(
 	diagramHist port.History,
 	dictionaryHist port.History,
 	dict port.DictionaryService,
+	diagramEditor port.DiagramEditor,
 	vault port.Vault,
 	th *theme.Theme,
 	log *slog.Logger,
@@ -104,6 +106,7 @@ func NewApp(
 		project:           proj,
 		validator:         val,
 		dictionary:        dict,
+		diagramEditor:     diagramEditor,
 		vault:             vault,
 		diagramHistory:    diagramHist,
 		dictionaryHistory: dictionaryHist,
@@ -203,7 +206,7 @@ func (a *App) initViews() {
 		a.screen = screenMode
 	})
 	a.welcomeView = newWelcomeView(a.infoMenu)
-	a.diagramView = newDiagramView(a.diagramHistory)
+	a.diagramView = newDiagramView(a.diagramEditor, a.diagramHistory)
 	a.forwardView = newForwardView(a.forward)
 	a.dictionaryView = newDictionaryView(a.dictionary, a.dictionaryHistory, a.theme.Material)
 	a.reverseView = newReverseView(a.reverse)

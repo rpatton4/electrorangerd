@@ -38,6 +38,14 @@ type ProjectService interface {
 	Save(ctx context.Context, path string, project domain.Project) error
 }
 
+// DiagramEditor produces new Projects in response to diagram-edit operations.
+// Methods are pure transformations: given a Project, they return a new
+// Project reflecting the edit. The UI applies the returned Project to its
+// in-memory state and pushes a domain.Command onto the History stack.
+type DiagramEditor interface {
+	AddEntity(ctx context.Context, project domain.Project, db, schema string, entity domain.Entity) (domain.Project, error)
+}
+
 // Validator checks a Project for logical and structural problems under a
 // selected ValidationProfile, returning one ValidationIssue per finding.
 type Validator interface {
