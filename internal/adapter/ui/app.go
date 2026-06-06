@@ -229,29 +229,37 @@ func (a *App) fillBackground(gtx layout.Context, c color.NRGBA) {
 
 // layoutModeNav draws the bottom navigation bar — a single circular button
 // rendered from the embedded chrome PNG, centred horizontally. Clicking
-// it toggles the menu overlay (see layoutMenuOverlay).
+// it opens the menu overlay. Dismiss is handled exclusively by the
+// scrim's click area (see layoutMenuOverlay); the nav button never
+// closes the menu, so there's no double-toggle race between the two
+// handlers on a single click.
 func (a *App) layoutModeNav(gtx layout.Context) layout.Dimensions {
-	if a.navClick.Clicked(gtx) {
-		a.menuOpen = !a.menuOpen
-		if a.menuOpen {
-			a.menuOpenedAt = gtx.Now
+	if a.menuOpen {
+		// While menu is up, drain any nav clicks that were captured
+		// before the slot stopped registering, so they don't pile up.
+		for a.navClick.Clicked(gtx) {
 		}
+	} else if a.navClick.Clicked(gtx) {
+		a.menuOpen = true
+		a.menuOpenedAt = gtx.Now
 	}
 
 	return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			sz := gtx.Dp(unit.Dp(56))
+			size := image.Pt(sz, sz)
+
+			// While the menu wheel is up the chrome button hides AND
+			// stops registering its click area, so the scrim above is
+			// the sole receiver of taps in the bottom-centre region.
+			// The 56dp slot is still reserved so the layout doesn't
+			// shift between open and closed states.
+			if a.menuOpen {
+				return layout.Dimensions{Size: size}
+			}
+
 			return a.navClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				sz := gtx.Dp(unit.Dp(56))
-				size := image.Pt(sz, sz)
 				gtx.Constraints = layout.Exact(size)
-
-				// When the menu wheel is up the chrome button hides but
-				// keeps its slot + click area, so tapping the same spot
-				// dismisses the menu without a layout shift.
-				if a.menuOpen {
-					return layout.Dimensions{Size: size}
-				}
-
 				defer clip.Ellipse{Max: size}.Push(gtx.Ops).Pop()
 				return widget.Image{
 					Src:      a.navButton,
@@ -272,7 +280,15 @@ func (a *App) layoutModeNav(gtx layout.Context) layout.Dimensions {
 func (a *App) layoutMenuOverlay(gtx layout.Context) layout.Dimensions {
 	_ = a.menuClick.Clicked(gtx) // consume; menu does nothing yet
 	if a.scrimClick.Clicked(gtx) {
+		// Close the menu now AND skip painting the overlay this frame —
+		// otherwise this frame still commits the scrim + wheel ops and
+		// the user only sees the close on the next frame (which won't
+		// fire until they click again). The invalidate makes the harness
+		// schedule a follow-up frame so the layout below (nav button
+		// re-registering its click area) settles properly.
 		a.menuOpen = false
+		gtx.Execute(op.InvalidateCmd{})
+		return layout.Dimensions{}
 	}
 
 	elapsed := gtx.Now.Sub(a.menuOpenedAt)
@@ -304,9 +320,19 @@ func (a *App) layoutMenuOverlay(gtx layout.Context) layout.Dimensions {
 	rotation := progress * 2 * float32(math.Pi)
 
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		sz := gtx.Dp(unit.Dp(320))
+		size := image.Pt(sz, sz)
+
+		// Restrict the menu's click area to the inscribed circle. Without
+		// this, the four corners of the 320dp bounding square (visually
+		// transparent — the geometric alpha mask makes them invisible)
+		// would still capture taps as menu clicks (a no-op), preventing
+		// the scrim from dismissing on what the user perceives as a tap
+		// outside the wheel. Clip pushed before menuClick.Layout so its
+		// gesture.Click is registered inside the elliptical clip.
+		defer clip.Ellipse{Max: size}.Push(gtx.Ops).Pop()
+
 		return a.menuClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			sz := gtx.Dp(unit.Dp(320))
-			size := image.Pt(sz, sz)
 			gtx.Constraints = layout.Exact(size)
 
 			centre := f32.Pt(float32(sz)/2, float32(sz)/2)
