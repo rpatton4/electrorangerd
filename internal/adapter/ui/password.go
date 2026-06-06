@@ -3,11 +3,18 @@ package ui
 import (
 	"context"
 	"errors"
+	"image"
 	"log/slog"
+	"math"
+	"time"
 
+	"gioui.org/f32"
 	"gioui.org/font"
 	"gioui.org/io/key"
 	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -27,6 +34,11 @@ const (
 	pwPhaseUnlocked                      // proceed to main UI
 )
 
+// vaultDoorAnimDuration is how long the vault-door open animation
+// takes — same value as infomenu's open duration so the login
+// screen and the mode wheel animate in lockstep visually.
+const vaultDoorAnimDuration = 500 * time.Millisecond
+
 // passwordView renders the master-password setup / unlock screen. It calls
 // port.Vault directly so the App's main loop only has to ask "are we
 // unlocked yet?" by looking at vault.Status().
@@ -34,16 +46,27 @@ type passwordView struct {
 	vault port.Vault
 	log   *slog.Logger
 
-	editor widget.Editor
-	submit widget.Clickable
+	editor          widget.Editor
+	vaultClick      widget.Clickable
+	editorWrapClick widget.Clickable
 
 	phase          passwordPhase
 	lastErr        string
 	focusRequested bool
+
+	// Vault-door focal image plus the timestamp the screen first
+	// rendered, so the door animates in (scale + rotate) once when
+	// the login surface appears.
+	vaultDoor paint.ImageOp
+	animStart time.Time
 }
 
 func newPasswordView(vault port.Vault, log *slog.Logger) *passwordView {
-	v := &passwordView{vault: vault, log: log}
+	v := &passwordView{
+		vault:     vault,
+		log:       log,
+		vaultDoor: decodeVaultDoor(log),
+	}
 	v.editor.SingleLine = true
 	v.editor.Mask = '•'
 	v.editor.Submit = true
@@ -86,12 +109,32 @@ func (v *passwordView) Done() bool {
 
 // Layout draws the appropriate prompt for the current phase. It returns
 // layout.Dimensions{} when the view should not be drawn (Done == true).
+// The vault-door image sits at the centre of the screen with the input
+// box overlaid on its centre; the door itself is clickable and acts as
+// the submit action — pressing Enter inside the editor does the same.
+// Any error from the previous attempt renders just below the door.
 func (v *passwordView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensions {
 	if v.phase == pwPhaseUnlocked {
 		return layout.Dimensions{}
 	}
 
-	// Handle Enter-key submit and button click identically.
+	// Submission: Enter inside the editor OR a click on the vault door
+	// outside the editor's region. The editor sits on top of the door
+	// in a Stack and we wrap it in editorWrapClick so we can detect
+	// when a click landed on the textbox — those clicks consume the
+	// editorWrapClick event AND would otherwise also fire vaultClick
+	// (both input areas overlap). When that happens we suppress the
+	// vault-door submission so typing-related clicks don't try to
+	// unlock the vault.
+	editorClickedThisFrame := false
+	for v.editorWrapClick.Clicked(gtx) {
+		editorClickedThisFrame = true
+	}
+	vaultClickedThisFrame := false
+	for v.vaultClick.Clicked(gtx) {
+		vaultClickedThisFrame = true
+	}
+
 	submitted := false
 	for {
 		ev, ok := v.editor.Update(gtx)
@@ -102,7 +145,7 @@ func (v *passwordView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimens
 			submitted = true
 		}
 	}
-	if v.submit.Clicked(gtx) {
+	if vaultClickedThisFrame && !editorClickedThisFrame {
 		submitted = true
 	}
 	if submitted {
@@ -114,46 +157,79 @@ func (v *passwordView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimens
 		v.focusRequested = true
 	}
 
-	title := "unlock the vault"
-	help := ""
-	button := "Unlock"
+	if v.animStart.IsZero() {
+		v.animStart = gtx.Now
+	}
+
 	hint := "insert your key"
 	if v.phase == pwPhaseSetup {
-		title = "welcome to your design grid"
-		help = "choose your key, this will encrypt all sensitive info"
-		button = "Create vault"
 		hint = "new key"
 	}
 
-	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		gtx.Constraints.Max.X = gtx.Dp(unit.Dp(480))
-		return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(material.H5(th.Material, title).Layout),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if help == "" {
-						return layout.Spacer{Height: unit.Dp(17)}.Layout(gtx)
-					}
-					return material.Body2(th.Material, help).Layout(gtx)
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return v.layoutEditor(gtx, th, hint)
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-				layout.Rigid(material.Button(th.Material, &v.submit, button).Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if v.lastErr == "" {
-						return layout.Dimensions{}
-					}
-					errLbl := material.Body2(th.Material, v.lastErr)
-					errLbl.Color = th.Error
-					return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, errLbl.Layout)
-				}),
-			)
-		})
-	})
+	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+					layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+						return v.vaultClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return v.layoutVaultDoor(gtx)
+						})
+					}),
+					layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+						gtx.Constraints.Max.X = gtx.Dp(unit.Dp(280))
+						return v.editorWrapClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return v.layoutEditor(gtx, th, hint)
+						})
+					}),
+				)
+			})
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if v.lastErr == "" {
+				return layout.Dimensions{}
+			}
+			errLbl := material.Body2(th.Material, v.lastErr)
+			errLbl.Color = th.Error
+			errLbl.Alignment = text.Middle
+			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, errLbl.Layout)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(40)}.Layout),
+	)
+}
+
+// layoutVaultDoor renders the vault-door image at 400dp square with
+// the same scale-from-1/8 + rotate-360°-over-500ms open animation as
+// the mode wheel. Animation start is recorded on the first Layout
+// call so the door animates in exactly once per session.
+func (v *passwordView) layoutVaultDoor(gtx layout.Context) layout.Dimensions {
+	sz := gtx.Dp(unit.Dp(400))
+	size := image.Pt(sz, sz)
+	gtx.Constraints = layout.Exact(size)
+
+	elapsed := gtx.Now.Sub(v.animStart)
+	progress := float32(elapsed) / float32(vaultDoorAnimDuration)
+	if progress >= 1 {
+		progress = 1
+	} else if progress < 0 {
+		progress = 0
+	}
+	if progress < 1 {
+		gtx.Execute(op.InvalidateCmd{})
+	}
+
+	scale := 0.125 + 0.875*progress
+	rotation := progress * 2 * float32(math.Pi)
+	centre := f32.Pt(float32(sz)/2, float32(sz)/2)
+	affine := f32.Affine2D{}.
+		Rotate(centre, rotation).
+		Scale(centre, f32.Pt(scale, scale))
+	defer op.Affine(affine).Push(gtx.Ops).Pop()
+
+	return widget.Image{
+		Src:      v.vaultDoor,
+		Fit:      widget.Cover,
+		Position: layout.Center,
+	}.Layout(gtx)
 }
 
 // layoutEditor draws the password input with a visible bordered chrome, a

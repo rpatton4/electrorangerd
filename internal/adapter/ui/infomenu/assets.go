@@ -41,7 +41,16 @@ func decodeMenuButton(log *slog.Logger) paint.ImageOp {
 		log.Error("decode menu button", "err", err)
 		return paint.ImageOp{}
 	}
+	return paint.NewImageOp(ApplyCircleMask(src))
+}
 
+// ApplyCircleMask returns a copy of src with every pixel outside the
+// inscribed circle punched to alpha=0, with a 1px anti-aliased edge
+// band around the boundary. The inscribed circle is centred at the
+// image's centre and has radius min(width/2, height/2). Reusable by
+// any caller in the ui tree that wants the same circular shaping
+// the info-menu wheel uses at decode time.
+func ApplyCircleMask(src image.Image) *image.NRGBA {
 	b := src.Bounds()
 	nsrc := image.NewNRGBA(b)
 	draw.Draw(nsrc, b, src, b.Min, draw.Src)
@@ -67,5 +76,5 @@ func decodeMenuButton(log *slog.Logger) paint.ImageOp {
 			dst.SetNRGBA(b.Min.X+x, b.Min.Y+y, c)
 		}
 	}
-	return paint.NewImageOp(dst)
+	return dst
 }
