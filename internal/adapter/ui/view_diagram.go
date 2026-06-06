@@ -111,6 +111,15 @@ type diagramView struct {
 	// means no selection.
 	selected domain.EntityID
 
+	// Relationship-drawing state. Active between a click on a handle of
+	// the selected entity and the next click. linkCursor follows the
+	// pointer so the in-flight line can be rendered from the clicked
+	// handle to the current cursor.
+	linking        bool
+	linkFromID     domain.EntityID
+	linkFromHandle int
+	linkCursor     f32.Point
+
 	lastPressAt  time.Time
 	lastPressPos f32.Point
 }
@@ -159,6 +168,7 @@ func (v *diagramView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensi
 	v.handleEditorEvents(gtx)
 
 	palette := entityPalette(th)
+	v.layoutRelationships(gtx, palette)
 	for _, rec := range domain.EntitiesIn(v.project) {
 		ent := rec.Entity
 		pos, ok := v.entityPosition(ent.ID)
@@ -174,6 +184,9 @@ func (v *diagramView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensi
 			v.layoutEditOverlay(gtx, th)
 		}
 		stk.Pop()
+	}
+	if v.linking {
+		v.layoutLinkInFlight(gtx, palette)
 	}
 
 	if sel := v.menu.Layout(gtx, th); sel == 0 {
@@ -216,10 +229,16 @@ func (v *diagramView) handlePointer(gtx layout.Context) {
 		case pointer.Press:
 			v.hoverPos = pe.Position
 			v.hovering = true
+			if v.linking {
+				v.linkCursor = pe.Position
+			}
 			v.onPress(gtx, pe)
 		case pointer.Drag:
 			v.hoverPos = pe.Position
 			v.hovering = true
+			if v.linking {
+				v.linkCursor = pe.Position
+			}
 			if v.dragging && v.dragID != 0 {
 				v.dragPos = domain.Position{
 					X: pe.Position.X - v.dragOff.X,
@@ -229,6 +248,9 @@ func (v *diagramView) handlePointer(gtx layout.Context) {
 		case pointer.Move, pointer.Enter:
 			v.hoverPos = pe.Position
 			v.hovering = true
+			if v.linking {
+				v.linkCursor = pe.Position
+			}
 		case pointer.Leave:
 			v.hovering = false
 		case pointer.Release, pointer.Cancel:
@@ -305,6 +327,23 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 		v.commitEdit()
 	}
 
+	// Relationship-drawing handling takes precedence over double-click,
+	// drag, and selection so the user can chase a handle with a quick
+	// follow-up click without it being interpreted as something else.
+	if v.linking {
+		v.completeLink(gtx, pe.Position)
+		return
+	}
+
+	// A click on one of the currently-selected entity's handles starts
+	// drawing a relationship instead of moving the entity.
+	if v.selected != 0 {
+		if _, h, ok := v.hitHandle(gtx, pe.Position); ok {
+			v.startLink(v.selected, h, pe.Position)
+			return
+		}
+	}
+
 	isDouble := v.trackPrimaryClick(pe.Position, gtx.Now)
 	if isDouble {
 		v.openSubEditor(gtx, pe.Position)
@@ -369,15 +408,18 @@ func (v *diagramView) handleKeys(gtx layout.Context, allMods key.Modifiers) {
 				}
 			}
 		case key.NameEscape:
-			if v.edit.kind != editNone {
+			switch {
+			case v.linking:
+				v.cancelLink()
+			case v.edit.kind != editNone:
 				v.cancelEdit()
-			} else if v.menu.IsOpen() {
+			case v.menu.IsOpen():
 				v.menu.Close()
-			} else if v.keyMenu.IsOpen() {
+			case v.keyMenu.IsOpen():
 				v.keyMenu.Close()
-			} else if v.addRowMenu.IsOpen() {
+			case v.addRowMenu.IsOpen():
 				v.addRowMenu.Close()
-			} else if v.rowMenu.IsOpen() {
+			case v.rowMenu.IsOpen():
 				v.rowMenu.Close()
 			}
 		}
@@ -512,6 +554,179 @@ func (v *diagramView) applyKeyMarker(sel int) {
 		v.project = updated
 		v.history.Push(domain.Command{Kind: domain.CmdUpdateEntity, Description: "Set key marker"})
 	}
+}
+
+// hitHandle reports the selected entity's handle index at p, if any, with
+// a forgiving radius slightly larger than the visual circle so handles at
+// box corners don't require pixel-perfect aim.
+func (v *diagramView) hitHandle(gtx layout.Context, p f32.Point) (id domain.EntityID, handle int, ok bool) {
+	if v.selected == 0 {
+		return 0, -1, false
+	}
+	ent, _, _, found := domain.FindEntity(v.project, v.selected)
+	if !found {
+		return 0, -1, false
+	}
+	pos, ok := v.entityPosition(v.selected)
+	if !ok {
+		return 0, -1, false
+	}
+	radius := float32(gtx.Dp(unit.Dp(8)))
+	r2 := radius * radius
+	for h := 0; h < canvas.HandleCount; h++ {
+		hx, hy := canvas.HandlePosition(gtx, ent, h)
+		dx := p.X - (pos.X + hx)
+		dy := p.Y - (pos.Y + hy)
+		if dx*dx+dy*dy <= r2 {
+			return v.selected, h, true
+		}
+	}
+	return 0, -1, false
+}
+
+// nearestHandle returns the handle index on the given entity whose centre
+// is closest to p.
+func (v *diagramView) nearestHandle(gtx layout.Context, id domain.EntityID, p f32.Point) int {
+	ent, _, _, ok := domain.FindEntity(v.project, id)
+	if !ok {
+		return -1
+	}
+	pos, ok := v.entityPosition(id)
+	if !ok {
+		return -1
+	}
+	best := 0
+	var bestD2 float32 = 1e18
+	for h := 0; h < canvas.HandleCount; h++ {
+		hx, hy := canvas.HandlePosition(gtx, ent, h)
+		dx := p.X - (pos.X + hx)
+		dy := p.Y - (pos.Y + hy)
+		d2 := dx*dx + dy*dy
+		if d2 < bestD2 {
+			bestD2 = d2
+			best = h
+		}
+	}
+	return best
+}
+
+// nearestHandlePair returns the (from, to) handle indices on the two
+// entities whose centres minimise the squared distance — used to
+// auto-route relationship lines so they re-anchor as entities move.
+func (v *diagramView) nearestHandlePair(gtx layout.Context, fromEnt domain.Entity, fromPos domain.Position, toEnt domain.Entity, toPos domain.Position) (int, int) {
+	bestFrom, bestTo := 0, 0
+	var bestD2 float32 = 1e18
+	for fh := 0; fh < canvas.HandleCount; fh++ {
+		fx, fy := canvas.HandlePosition(gtx, fromEnt, fh)
+		fxAbs := fromPos.X + fx
+		fyAbs := fromPos.Y + fy
+		for th := 0; th < canvas.HandleCount; th++ {
+			tx, ty := canvas.HandlePosition(gtx, toEnt, th)
+			dx := (toPos.X + tx) - fxAbs
+			dy := (toPos.Y + ty) - fyAbs
+			d2 := dx*dx + dy*dy
+			if d2 < bestD2 {
+				bestD2 = d2
+				bestFrom = fh
+				bestTo = th
+			}
+		}
+	}
+	return bestFrom, bestTo
+}
+
+// startLink begins drawing a relationship line out of the handle at index
+// h on entity id. The line follows the cursor (tracked via Move/Drag
+// events) until the user completes or cancels.
+func (v *diagramView) startLink(id domain.EntityID, h int, cursor f32.Point) {
+	v.menu.Close()
+	v.keyMenu.Close()
+	v.addRowMenu.Close()
+	v.rowMenu.Close()
+	v.linking = true
+	v.linkFromID = id
+	v.linkFromHandle = h
+	v.linkCursor = cursor
+}
+
+// cancelLink discards any in-flight relationship-drawing state.
+func (v *diagramView) cancelLink() {
+	v.linking = false
+	v.linkFromID = 0
+	v.linkFromHandle = 0
+}
+
+// completeLink tries to attach the in-flight line to whichever entity sits
+// under p. Clicking on the source entity, on empty space, or on a target
+// where the service refuses (e.g. duplicate endpoints) cancels the link.
+func (v *diagramView) completeLink(gtx layout.Context, p f32.Point) {
+	if !v.linking {
+		return
+	}
+	id, hit := v.hitEntity(gtx, p)
+	if !hit || id == v.linkFromID {
+		v.cancelLink()
+		return
+	}
+	rel := domain.Relationship{
+		From: domain.RelationshipEndpoint{Entity: v.linkFromID},
+		To:   domain.RelationshipEndpoint{Entity: id},
+	}
+	updated, _, err := v.diagramEditor.AddRelationship(context.TODO(), v.project, rel)
+	if err == nil {
+		v.project = updated
+		v.history.Push(domain.Command{Kind: domain.CmdAddRelationship, Description: "Add relationship"})
+	}
+	v.cancelLink()
+}
+
+// layoutRelationships draws every stored relationship as a straight line
+// between the nearest pair of handles on its two endpoint entities, so
+// lines re-route automatically as entities are moved.
+func (v *diagramView) layoutRelationships(gtx layout.Context, palette canvas.EntityPalette) {
+	for _, rel := range v.project.Relationships {
+		fromEnt, _, _, ok := domain.FindEntity(v.project, rel.From.Entity)
+		if !ok {
+			continue
+		}
+		toEnt, _, _, ok := domain.FindEntity(v.project, rel.To.Entity)
+		if !ok {
+			continue
+		}
+		fromPos, ok := v.entityPosition(rel.From.Entity)
+		if !ok {
+			continue
+		}
+		toPos, ok := v.entityPosition(rel.To.Entity)
+		if !ok {
+			continue
+		}
+		fh, th := v.nearestHandlePair(gtx, fromEnt, fromPos, toEnt, toPos)
+		fx, fy := canvas.HandlePosition(gtx, fromEnt, fh)
+		tx, ty := canvas.HandlePosition(gtx, toEnt, th)
+		v.canvas.RelationshipLine(gtx, palette,
+			f32.Pt(fromPos.X+fx, fromPos.Y+fy),
+			f32.Pt(toPos.X+tx, toPos.Y+ty),
+		)
+	}
+}
+
+// layoutLinkInFlight draws the line currently being dragged out of a
+// handle, from the originally-clicked handle to the live cursor.
+func (v *diagramView) layoutLinkInFlight(gtx layout.Context, palette canvas.EntityPalette) {
+	ent, _, _, ok := domain.FindEntity(v.project, v.linkFromID)
+	if !ok {
+		return
+	}
+	pos, ok := v.entityPosition(v.linkFromID)
+	if !ok {
+		return
+	}
+	hx, hy := canvas.HandlePosition(gtx, ent, v.linkFromHandle)
+	v.canvas.RelationshipLine(gtx, palette,
+		f32.Pt(pos.X+hx, pos.Y+hy),
+		v.linkCursor,
+	)
 }
 
 // entityForRender returns a copy of ent with the text being edited blanked

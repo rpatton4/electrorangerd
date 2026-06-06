@@ -134,10 +134,46 @@ func keyMarker(a domain.Attribute) string {
 	return a.KeyKind.String()
 }
 
+// HandleCount is the number of attachment handles drawn around each entity
+// when selected. Indices 0..HandleCount-1 wrap the box edges in clockwise
+// order starting from the top-left handle.
+const HandleCount = 8
+
+// HandlePosition returns the offset (in gtx pixels) of the handle at index
+// from the entity's top-left corner. Both EntitySelection and any caller
+// that needs to attach a line to a handle should use this so the visual
+// circles and the hit / line geometry stay in lockstep.
+func HandlePosition(gtx layout.Context, e domain.Entity, handle int) (x, y float32) {
+	headerH := float32(gtx.Dp(unit.Dp(28)))
+	rowH := float32(gtx.Dp(unit.Dp(24)))
+	boxW := float32(gtx.Dp(unit.Dp(220)))
+	rows := float32(len(e.Attributes))
+	boxH := headerH + rows*rowH
+	switch handle {
+	case 0:
+		return boxW / 3, 0
+	case 1:
+		return 2 * boxW / 3, 0
+	case 2:
+		return boxW, boxH / 3
+	case 3:
+		return boxW, 2 * boxH / 3
+	case 4:
+		return 2 * boxW / 3, boxH
+	case 5:
+		return boxW / 3, boxH
+	case 6:
+		return 0, 2 * boxH / 3
+	case 7:
+		return 0, boxH / 3
+	}
+	return 0, 0
+}
+
 // EntitySelection paints the selection chrome over an entity already drawn
 // at the current transform origin: a thicker accent outline and eight small
 // attachment-point circles, two per side at the 1/3 and 2/3 marks. The
-// circles are the anchor points future relationship lines will hook onto.
+// circles are the anchor points relationship lines hook onto.
 func (c *Canvas) EntitySelection(gtx layout.Context, p EntityPalette, e domain.Entity) {
 	headerH := gtx.Dp(unit.Dp(28))
 	rowH := gtx.Dp(unit.Dp(24))
@@ -150,16 +186,23 @@ func (c *Canvas) EntitySelection(gtx layout.Context, p EntityPalette, e domain.E
 	strokeOutline(gtx, size, boldStroke, p.Selection)
 
 	radius := gtx.Dp(unit.Dp(4))
-	// Top + bottom edges: 1/3 and 2/3 along X.
-	drawHandle(gtx, image.Pt(boxW/3, 0), radius, p.Selection)
-	drawHandle(gtx, image.Pt(2*boxW/3, 0), radius, p.Selection)
-	drawHandle(gtx, image.Pt(boxW/3, boxH), radius, p.Selection)
-	drawHandle(gtx, image.Pt(2*boxW/3, boxH), radius, p.Selection)
-	// Left + right edges: 1/3 and 2/3 along Y.
-	drawHandle(gtx, image.Pt(0, boxH/3), radius, p.Selection)
-	drawHandle(gtx, image.Pt(0, 2*boxH/3), radius, p.Selection)
-	drawHandle(gtx, image.Pt(boxW, boxH/3), radius, p.Selection)
-	drawHandle(gtx, image.Pt(boxW, 2*boxH/3), radius, p.Selection)
+	for h := 0; h < HandleCount; h++ {
+		x, y := HandlePosition(gtx, e, h)
+		drawHandle(gtx, image.Pt(int(x), int(y)), radius, p.Selection)
+	}
+}
+
+// RelationshipLine draws a single straight line between two screen-space
+// points in the selection accent colour. Caller renders the line in the
+// diagram-view coordinate space (no per-entity transform pushed).
+func (c *Canvas) RelationshipLine(gtx layout.Context, p EntityPalette, from, to f32.Point) {
+	var path clip.Path
+	path.Begin(gtx.Ops)
+	path.MoveTo(from)
+	path.LineTo(to)
+	spec := path.End()
+	width := float32(gtx.Dp(unit.Dp(2)))
+	paint.FillShape(gtx.Ops, p.Selection, clip.Stroke{Path: spec, Width: width}.Op())
 }
 
 func drawHandle(gtx layout.Context, centre image.Point, radius int, col color.NRGBA) {
