@@ -1221,6 +1221,13 @@ func (v *diagramView) createEntity(_ layout.Context, at image.Point) {
 	}
 
 	v.history.Push(domain.Command{Kind: domain.CmdAddEntity, Description: "Add entity"})
+
+	// Select the new entity and open the header editor so the user can
+	// type the entity's name right away. Focus is routed to the editor
+	// automatically by Layout while v.edit.kind != editNone.
+	v.selected = id
+	v.selectedRel = 0
+	v.beginTextEdit(editTarget{kind: editHeader, entityID: id}, entityNamePlaceholder)
 }
 
 // layoutEditOverlay paints an opaque background and the inline editor over
