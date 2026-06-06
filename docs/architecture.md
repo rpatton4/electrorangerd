@@ -160,3 +160,40 @@ A combined four-value enum would force every renderer, validator, and DDL emitte
 **Concurrency**: the vault service holds a single `sync.Mutex` guarding `status`, `dek`, and `blob`. Every public method takes it. The architect's "core services own their goroutines" rule applies — UI dispatches calls through inbound port methods and never reaches into the vault's internal state.
 
 **What's NOT a separate adapter**: the architect explicitly called against a separate `adapter/keychain` package. Keychain integration is "fallback storage of the master key — same security domain, same lifecycle" as the vault file, so both live in `adapter/vault/`.
+
+## UI shell layout (Plan C decision record)
+
+**Decision**: `adapter/ui/` splits by concern (per the ~8-file threshold rule in CLAUDE.md) into three subpackages — `canvas/`, `panel/`, `dialog/` — plus a flat set of root files for the App, theme, mode enum, master-password gate, markdown wrapper, and the four per-mode views.
+
+**Structure**:
+
+```
+adapter/ui/
+├── app.go              # root: window + event loop + mode dispatcher
+├── doc.go
+├── theme.go            # colors, fonts
+├── mode.go             # Mode enum + allModes order
+├── markdown.go         # gioui.org/x/markdown renderer wrapper
+├── password.go         # master-password gate (Setup / Unlock / KeychainProbe)
+├── view_diagram.go     # ModeDiagramEdit
+├── view_forward.go     # ModeForwardEngineering
+├── view_dictionary.go  # ModeDataDictionary (renders markdown via richtext)
+├── view_reverse.go     # ModeReverseEngineering
+├── canvas/             # 2.5D ERD canvas (shear math + sheared box)
+├── panel/              # peek panel + paint helpers
+└── dialog/             # drawer-style button widget
+```
+
+**Why subpackage by concern, not by Gio primitive**: `canvas/` owns the 2.5D shear and entity rendering; `panel/` owns side rails; `dialog/` owns modal-flavoured widgets. There is NO `widget/` — Gio widgets are functions returning `layout.Widget`, not nouns that deserve a folder. The split tracks user-facing UI surfaces, which is what the architect specified.
+
+**Master-password gate**: `password.go` owns its own `widget.Editor` (masked with `•`) and `widget.Clickable`. On every frame the App's main loop asks `passwordView.Done()` — when false the prompt renders; when true the App constructs the per-mode views lazily and dispatches to the active one. `tryKeychainUnlock` runs once before the first prompt-rendered frame so the user sees the main UI immediately if a valid DEK lives in the OS keychain.
+
+**Mode state machine**: a single `Mode` enum + four `widget.Clickable` fields in `App.modeClicks` produce the top nav. The active mode is highlighted with a `▸` prefix. Mode switching is constant-time — no view rebuild — because each per-mode view is held as a struct on `App` and only its `Layout` method runs for the active mode.
+
+**Per-mode History scoping**: `App` holds two `port.History` references — `diagramHistory` and `dictionaryHistory`. Forward and reverse engineering modes do not have undo stacks because they are one-shot operations (review a `MigrationPlan` and apply or discard; review a generated `domain.Project` and accept or discard). The composition root constructs both histories via separate `core.NewHistory` calls.
+
+**Peek panel**: lives in `panel/peek.go`. The App owns the `Open` flag and toggles it via a button in the top nav; the panel reads `Open` each frame and either occupies zero space or a fixed 280dp side rail. Real selection-driven content arrives when the canvas can identify the selected schema element.
+
+**Markdown rendering**: `gioui.org/x/markdown` produces `[]richtext.SpanStyle`; the dictionary view caches the spans and re-runs the renderer when the source markdown changes. The richtext package handles wrapping and click events (e.g., on links) without bringing markdown concerns into other packages — the architect's "no MarkdownRenderer port" rule holds.
+
+**Sample 2.5D entity**: `canvas/canvas.go` exposes `SampleEntity(gtx, theme, title)` that draws a shadow, a sheared box, and an upright title centered over it. Cabinet-projection shear factor is 0.5 (≈ 30° classic axonometric look). Real per-entity walks over a `domain.Project` arrive when business logic lands; the helper proves the shear works without requiring real data.

@@ -42,7 +42,7 @@ The scope expansion is delivered as three sequenced plans, NOT one mega-plan:
 
 - **Plan A (foundation, complete)** — domain reshape, port signature updates, doc lock-ins.
 - **Plan B (vault, complete)** — `Vault` inbound port + `adapter/vault` with Argon2id KDF + AES-GCM encryption + DEK/KEK wrapping; build-tagged OS keychain integration via `github.com/zalando/go-keyring` (macOS Keychain / Windows Credential Manager / Linux Secret Service). On-disk blob is `<UserConfigDir>/electrorangerd/vault.json` (atomic-rename writes, 0600 perms). `domain.ConnectionProfile.EncryptedDSN` replaces plaintext DSN; profiles are stored inside the vault blob, NOT in `domain.Config`.
-- **Plan C (UI shell, next)** — per-mode UI in `adapter/ui/`: 4-mode state machine, peek panel, mode-local `History` stack, markdown rendering via `gioui.org/x/markdown`, 2.5D canvas, drawer-style buttons, master-password prompt at launch (with opt-in keychain auto-unlock).
+- **Plan C (UI shell, complete)** — per-mode UI in `adapter/ui/`: master-password gate at launch (with opt-in keychain auto-unlock), 4-mode state machine + nav, per-mode views (diagram / forward / dictionary / reverse), peek panel as a side-rail, mode-local History stacks (diagram + dictionary; forward / reverse are one-shot), markdown rendering via `gioui.org/x/markdown` + `gioui.org/x/richtext` in the dictionary view, sample 2.5D canvas with cabinet-projection shear under `adapter/ui/canvas/`, and a drawer-style button widget under `adapter/ui/dialog/`. The four views are placeholders that will be filled in as real ERD logic lands per-mode.
 
 ## Architecture: hexagonal (ports & adapters)
 
@@ -149,7 +149,6 @@ Plus the usual: `go build ./...`, `go vet ./...`, `go test ./...` from `main/`.
 
 ## Out of scope (don't bolt on without asking)
 
-- **Per-mode UI** — Plan C: the four-mode state machine, peek panel, mode-local History stacks, master-password prompt UI, markdown rendering, drawer animations, the 2.5D canvas itself.
 - **Telemetry beyond `slog`**
 - **Backwards-compat layers / migration shims**
 - **CI workflows**
@@ -157,8 +156,9 @@ Plus the usual: `go build ./...`, `go vet ./...`, `go test ./...` from `main/`.
 - **Second SQL dialect**
 - **`adapter/dictionaryfile`** — separate on-disk dictionary persistence lands when real save/load logic does.
 - **Implicit FK heuristic engine** — reverse-engineering logic, not the type model (the Provenance type that records inferred FKs IS in Plan A).
-- **Crow's foot rendering glyphs** — the cardinality/optionality types are in Plan A; the visual rendering lands with the canvas in Plan C.
+- **Crow's foot rendering glyphs** — the cardinality / optionality types are in Plan A and the 2.5D canvas in Plan C; per-endpoint glyphs land when real Relationship walking does.
+- **Real per-entity ERD canvas rendering** — Plan C ships a sample sheared entity to prove the 2.5D pattern works; the per-`domain.Project` walk + connector routing + hit-testing land per-mode as real editing logic arrives.
 
 ## Current state
 
-Plans A (foundation reshape) and B (vault) are complete. Every service method body still returns `errs.ErrNotImplemented` except the Vault service, which is fully functional (Initialize / Unlock / Lock / ChangePassword / profile CRUD / OS keychain integration). The UI is still a placeholder Gio window. Plan C (per-mode UI shell) is the next plan.
+All three foundation plans (A foundation, B vault, C UI shell) are complete. The Vault is the only service with full functionality; every other core service method still returns `errs.ErrNotImplemented`. The UI presents a real master-password gate at launch, a four-mode strict switch nav, four placeholder mode views (one with rendered markdown, one with a sheared sample entity, one with a drawer-button demo), and a toggleable peek panel. Future plans wire real business logic into the core services and replace each per-mode placeholder with the actual ERD interactions.

@@ -45,7 +45,10 @@ func main() {
 	}
 
 	validator := core.NewValidator(logger)
-	history := core.NewHistory(logger)
+	// Two history stacks: per-mode scoping per CLAUDE.md Plan C. Forward and
+	// reverse engineering are one-shot operations and have no undo stack.
+	diagramHistory := core.NewHistory(logger)
+	dictionaryHistory := core.NewHistory(logger)
 	drift := core.NewDriftDetector(logger)
 	forward := core.NewForwardService(pgApplier, flyWriter, validator, logger)
 	reverse := core.NewReverseService(pgIntrospector, flyReader, logger)
@@ -53,7 +56,7 @@ func main() {
 	project := core.NewProjectService(projStore, nil, cfgStore, logger)
 	dictionarySvc := core.NewDictionaryService(nil, logger)
 
-	application := ui.NewApp(forward, reverse, drift, project, validator, history, dictionarySvc, vault, logger)
+	application := ui.NewApp(forward, reverse, drift, project, validator, diagramHistory, dictionaryHistory, dictionarySvc, vault, logger)
 	if err := application.Run(); err != nil {
 		logger.Error("application run", "err", err)
 		os.Exit(1)
