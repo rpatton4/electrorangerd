@@ -81,17 +81,24 @@ type diagramView struct {
 	project domain.Project
 	boxes   []diagram.Box
 
-	menu     *dialog.ContextMenu
-	keyMenu  *dialog.ContextMenu
-	inputTag struct{}
+	menu       *dialog.ContextMenu
+	keyMenu    *dialog.ContextMenu
+	addRowMenu *dialog.ContextMenu
+	rowMenu    *dialog.ContextMenu
+	inputTag   struct{}
 
 	dragging bool
 	dragIdx  int
 	dragOff  f32.Point
 
-	edit          editTarget
-	editor        widget.Editor
-	keyMenuTarget editTarget
+	edit             editTarget
+	editor           widget.Editor
+	keyMenuTarget    editTarget
+	addRowMenuTarget int
+	rowMenuTarget    editTarget
+
+	hovering bool
+	hoverPos f32.Point
 
 	lastPressAt  time.Time
 	lastPressPos f32.Point
@@ -108,8 +115,12 @@ func newDiagramView(de port.DiagramEditor, history port.History) *diagramView {
 				{Name: defaultDatabase, Schemas: []domain.Schema{{Name: defaultSchema}}},
 			},
 		},
-		menu:    dialog.NewContextMenu("Create Entity"),
-		keyMenu: dialog.NewContextMenu("PK", "FK", "IK"),
+		menu:             dialog.NewContextMenu("Create Entity"),
+		keyMenu:          dialog.NewContextMenu("PK", "FK", "IK"),
+		addRowMenu:       dialog.NewContextMenu("Add row (a)"),
+		rowMenu:          dialog.NewContextMenu("Add row (a)", "Delete row (d)"),
+		addRowMenuTarget: -1,
+		rowMenuTarget:    editTarget{entityIdx: -1, attrIdx: -1},
 	}
 	v.editor.SingleLine = true
 	v.editor.Submit = true
@@ -155,6 +166,19 @@ func (v *diagramView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensi
 	if sel := v.keyMenu.Layout(gtx, th); sel >= 0 {
 		v.applyKeyMarker(sel)
 	}
+	if sel := v.addRowMenu.Layout(gtx, th); sel == 0 {
+		v.addRow(gtx, v.addRowMenuTarget)
+		v.addRowMenuTarget = -1
+	}
+	if sel := v.rowMenu.Layout(gtx, th); sel >= 0 {
+		switch sel {
+		case 0:
+			v.addRow(gtx, v.rowMenuTarget.entityIdx)
+		case 1:
+			v.deleteRow(gtx, v.rowMenuTarget.entityIdx, v.rowMenuTarget.attrIdx)
+		}
+		v.rowMenuTarget = editTarget{entityIdx: -1, attrIdx: -1}
+	}
 
 	return layout.Dimensions{Size: gtx.Constraints.Max}
 }
@@ -163,7 +187,7 @@ func (v *diagramView) handlePointer(gtx layout.Context) {
 	for {
 		ev, ok := gtx.Source.Event(pointer.Filter{
 			Target: &v.inputTag,
-			Kinds:  pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel,
+			Kinds:  pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel | pointer.Move | pointer.Enter | pointer.Leave,
 		})
 		if !ok {
 			break
@@ -174,14 +198,23 @@ func (v *diagramView) handlePointer(gtx layout.Context) {
 		}
 		switch pe.Kind {
 		case pointer.Press:
+			v.hoverPos = pe.Position
+			v.hovering = true
 			v.onPress(gtx, pe)
 		case pointer.Drag:
+			v.hoverPos = pe.Position
+			v.hovering = true
 			if v.dragging && v.dragIdx >= 0 && v.dragIdx < len(v.boxes) {
 				v.boxes[v.dragIdx].Position = diagram.Position{
 					X: pe.Position.X - v.dragOff.X,
 					Y: pe.Position.Y - v.dragOff.Y,
 				}
 			}
+		case pointer.Move, pointer.Enter:
+			v.hoverPos = pe.Position
+			v.hovering = true
+		case pointer.Leave:
+			v.hovering = false
 		case pointer.Release, pointer.Cancel:
 			v.dragging = false
 		}
@@ -194,7 +227,23 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 	if pe.Buttons&pointer.ButtonSecondary != 0 {
 		v.commitEdit()
 		v.keyMenu.Close()
-		v.menu.Open(at)
+		v.menu.Close()
+		v.addRowMenu.Close()
+		v.rowMenu.Close()
+		// Right-click is contextual: on a row of an entity it offers
+		// Add row + Delete row; on an entity's header it offers Add row
+		// only; on empty diagram space it offers Create Entity.
+		eIdx, sub, aIdx := v.hitSubArea(gtx, pe.Position)
+		switch {
+		case eIdx < 0:
+			v.menu.Open(at)
+		case sub == subKeyMarker || sub == subAttrName:
+			v.rowMenuTarget = editTarget{entityIdx: eIdx, attrIdx: aIdx}
+			v.rowMenu.Open(at)
+		default:
+			v.addRowMenuTarget = eIdx
+			v.addRowMenu.Open(at)
+		}
 		return
 	}
 	if pe.Buttons&pointer.ButtonPrimary == 0 {
@@ -205,7 +254,7 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 	// scrim handles off-menu dismissal and its items handle selection —
 	// closing it from this handler would short-circuit those drains in the
 	// same frame and drop the click on the floor.
-	if v.menu.IsOpen() || v.keyMenu.IsOpen() {
+	if v.menu.IsOpen() || v.keyMenu.IsOpen() || v.addRowMenu.IsOpen() || v.rowMenu.IsOpen() {
 		return
 	}
 
@@ -239,6 +288,8 @@ func (v *diagramView) handleKeys(gtx layout.Context, allMods key.Modifiers) {
 	for {
 		ev, ok := gtx.Source.Event(
 			key.Filter{Name: "C", Optional: allMods},
+			key.Filter{Name: "A", Optional: allMods},
+			key.Filter{Name: "D", Optional: allMods},
 			key.Filter{Name: key.NameEscape, Optional: allMods},
 		)
 		if !ok {
@@ -257,6 +308,24 @@ func (v *diagramView) handleKeys(gtx layout.Context, allMods key.Modifiers) {
 			if v.edit.kind == editNone && ke.Modifiers == 0 {
 				v.createEntity(gtx, canvasCentreTopLeft(gtx))
 			}
+		case "A":
+			// 'a' is the "(a)" shortcut on the entity context menu. It adds
+			// a row to the entity under the cursor. While editing, defer to
+			// the inline editor's text input.
+			if v.edit.kind == editNone && ke.Modifiers == 0 && v.hovering {
+				if idx, hit := v.hitEntity(v.hoverPos); hit {
+					v.addRow(gtx, idx)
+				}
+			}
+		case "D":
+			// 'd' is the "(d)" shortcut on the row context menu. It removes
+			// the row under the cursor (only meaningful on a row, not the
+			// header). While editing, defer to the inline editor's text input.
+			if v.edit.kind == editNone && ke.Modifiers == 0 && v.hovering {
+				if eIdx, sub, aIdx := v.hitSubArea(gtx, v.hoverPos); eIdx >= 0 && (sub == subKeyMarker || sub == subAttrName) {
+					v.deleteRow(gtx, eIdx, aIdx)
+				}
+			}
 		case key.NameEscape:
 			if v.edit.kind != editNone {
 				v.cancelEdit()
@@ -264,6 +333,10 @@ func (v *diagramView) handleKeys(gtx layout.Context, allMods key.Modifiers) {
 				v.menu.Close()
 			} else if v.keyMenu.IsOpen() {
 				v.keyMenu.Close()
+			} else if v.addRowMenu.IsOpen() {
+				v.addRowMenu.Close()
+			} else if v.rowMenu.IsOpen() {
+				v.rowMenu.Close()
 			}
 		}
 	}
@@ -466,6 +539,63 @@ func (v *diagramView) trackPrimaryClick(at f32.Point, now time.Time) bool {
 	v.lastPressAt = now
 	v.lastPressPos = at
 	return false
+}
+
+// addRow appends a new empty Attribute to the entity at entityIdx via the
+// DiagramEditor port and grows the entity's placement box height to match.
+func (v *diagramView) addRow(gtx layout.Context, entityIdx int) {
+	if entityIdx < 0 || entityIdx >= len(v.entities()) {
+		return
+	}
+	ent := v.entities()[entityIdx]
+	attrs := append([]domain.Attribute(nil), ent.Attributes...)
+	attrs = append(attrs, domain.Attribute{})
+	ent.Attributes = attrs
+
+	updated, err := v.diagramEditor.UpdateEntity(context.TODO(), v.project, defaultDatabase, defaultSchema, entityIdx, ent)
+	if err != nil {
+		return
+	}
+	v.project = updated
+
+	rowH := gtx.Dp(entityRowDp)
+	v.boxes[entityIdx].Height += float32(rowH)
+	v.history.Push(domain.Command{Kind: domain.CmdAddAttribute, Description: "Add row"})
+}
+
+// deleteRow removes the Attribute at attrIdx from the entity at entityIdx
+// via the DiagramEditor port and shrinks the entity's placement box height
+// by one row.
+func (v *diagramView) deleteRow(gtx layout.Context, entityIdx, attrIdx int) {
+	if entityIdx < 0 || entityIdx >= len(v.entities()) {
+		return
+	}
+	ent := v.entities()[entityIdx]
+	if attrIdx < 0 || attrIdx >= len(ent.Attributes) {
+		return
+	}
+	attrs := append([]domain.Attribute(nil), ent.Attributes...)
+	attrs = append(attrs[:attrIdx], attrs[attrIdx+1:]...)
+	ent.Attributes = attrs
+
+	// If the inline editor is open on the row being removed, drop the edit
+	// so the next frame doesn't try to render an overlay at a stale index.
+	if v.edit.kind == editAttrName && v.edit.entityIdx == entityIdx && v.edit.attrIdx == attrIdx {
+		v.edit = editTarget{}
+	}
+
+	updated, err := v.diagramEditor.UpdateEntity(context.TODO(), v.project, defaultDatabase, defaultSchema, entityIdx, ent)
+	if err != nil {
+		return
+	}
+	v.project = updated
+
+	rowH := gtx.Dp(entityRowDp)
+	v.boxes[entityIdx].Height -= float32(rowH)
+	if v.boxes[entityIdx].Height < 0 {
+		v.boxes[entityIdx].Height = 0
+	}
+	v.history.Push(domain.Command{Kind: domain.CmdRemoveAttribute, Description: "Delete row"})
 }
 
 func (v *diagramView) createEntity(gtx layout.Context, at image.Point) {

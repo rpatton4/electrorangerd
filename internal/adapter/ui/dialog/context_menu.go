@@ -121,6 +121,7 @@ func (m *ContextMenu) Layout(gtx layout.Context, th *theme.Theme) int {
 	stroke := gtx.Dp(unit.Dp(1))
 	fillBorder(gtx, image.Rect(0, 0, width, height), stroke, th.Outline)
 
+	pad := gtx.Dp(unit.Dp(8))
 	for i := range m.Items {
 		item := &m.Items[i]
 		offsetY := i * itemH
@@ -128,12 +129,27 @@ func (m *ContextMenu) Layout(gtx layout.Context, th *theme.Theme) int {
 		local := gtx
 		local.Constraints = layout.Exact(image.Pt(width, itemH))
 		item.click.Layout(local, func(gtx layout.Context) layout.Dimensions {
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				lbl := material.Body2(th.Material, item.Label)
-				lbl.Color = th.OnSurface
-				lbl.Alignment = text.Start
-				return lbl.Layout(gtx)
-			})
+			// Render the label at natural size, left-aligned with an 8dp
+			// inset, vertically centred. Return the full row size so the
+			// Clickable's clip covers the entire item, not just the text.
+			macro := op.Record(gtx.Ops)
+			sub := gtx
+			sub.Constraints.Min = image.Point{}
+			sub.Constraints.Max.X = gtx.Constraints.Max.X - pad
+			lbl := material.Body2(th.Material, item.Label)
+			lbl.Color = th.OnSurface
+			lbl.Alignment = text.Start
+			dims := lbl.Layout(sub)
+			call := macro.Stop()
+
+			dy := (gtx.Constraints.Max.Y - dims.Size.Y) / 2
+			if dy < 0 {
+				dy = 0
+			}
+			off := op.Affine(f32.Affine2D{}.Offset(f32.Pt(float32(pad), float32(dy)))).Push(gtx.Ops)
+			call.Add(gtx.Ops)
+			off.Pop()
+			return layout.Dimensions{Size: gtx.Constraints.Max}
 		})
 		itemArea.Pop()
 	}
