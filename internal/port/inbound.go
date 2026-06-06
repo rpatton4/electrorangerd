@@ -58,3 +58,36 @@ type DictionaryService interface {
 	Get(ref domain.DictionaryRef) (domain.DictionaryEntry, bool)
 	Set(ref domain.DictionaryRef, entry domain.DictionaryEntry) error
 }
+
+// Vault is the master-password-protected secret store. It holds connection
+// profile DSNs encrypted with a data-encryption-key (DEK); the DEK itself is
+// wrapped by a key-encryption-key (KEK) derived from the master password via
+// Argon2id. The Vault must be unlocked (via Unlock or TryKeychainUnlock)
+// before any profile DSN can be read or written; Lock clears the in-memory
+// DEK and returns the vault to the Locked state without touching disk.
+//
+// On first use the vault is Uninitialized; Initialize sets the master
+// password, generates the DEK, and writes the on-disk blob. Subsequent
+// launches read the blob and start Locked.
+//
+// Keychain integration is opt-in: EnableKeychain stores the DEK in the OS
+// keychain (macOS Keychain / Windows Credential Manager / Linux Secret
+// Service) so the next launch can auto-unlock via TryKeychainUnlock without
+// prompting the user for a password.
+type Vault interface {
+	Status() domain.VaultStatus
+	Initialize(ctx context.Context, password string) error
+	Unlock(ctx context.Context, password string) error
+	Lock()
+	ChangePassword(ctx context.Context, oldPassword, newPassword string) error
+
+	GetProfileDSN(name string) (string, error)
+	SaveProfileDSN(ctx context.Context, name, dsn string) error
+	DeleteProfile(ctx context.Context, name string) error
+	ListProfiles() ([]string, error)
+
+	EnableKeychain(ctx context.Context) error
+	DisableKeychain(ctx context.Context) error
+	IsKeychainEnabled() bool
+	TryKeychainUnlock(ctx context.Context) error
+}

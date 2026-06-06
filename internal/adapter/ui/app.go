@@ -24,6 +24,7 @@ type App struct {
 	validator  port.Validator
 	history    port.History
 	dictionary port.DictionaryService
+	vault      port.Vault
 	log        *slog.Logger
 	theme      *Theme
 }
@@ -38,6 +39,7 @@ func NewApp(
 	val port.Validator,
 	hist port.History,
 	dict port.DictionaryService,
+	vault port.Vault,
 	log *slog.Logger,
 ) *App {
 	return &App{
@@ -48,6 +50,7 @@ func NewApp(
 		validator:  val,
 		history:    hist,
 		dictionary: dict,
+		vault:      vault,
 		log:        log,
 		theme:      NewTheme(),
 	}

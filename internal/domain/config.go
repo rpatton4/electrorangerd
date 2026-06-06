@@ -7,19 +7,11 @@ type WindowState struct {
 	Height int
 }
 
-// ConnectionProfile holds a named database connection string for the user's
-// connection picker. Plan B moves DSN handling to the Vault — DSN will
-// become an opaque encrypted blob (or the field will be removed in favor
-// of a vault lookup by Name). Until Plan B lands, DSN remains plaintext.
-type ConnectionProfile struct {
-	Name string
-	DSN  string
-}
-
-// Config is the persisted application configuration, written to disk between
-// sessions.
+// Config is the persisted non-secret application configuration, written to
+// disk between sessions. Connection profiles are NOT held here — they live in
+// the encrypted vault (see VaultBlob) so plaintext DSNs never appear in the
+// config file.
 type Config struct {
-	ConnectionProfiles []ConnectionProfile
-	RecentFiles        []string
-	Window             WindowState
+	RecentFiles []string
+	Window      WindowState
 }

@@ -137,3 +137,26 @@ A combined four-value enum would force every renderer, validator, and DDL emitte
 **Why not a separate `InferredRelationship` type**: forces parallel handling code at every relationship-aware site (rendering, validation, drift, forward-eng). One Relationship type with a Provenance field keeps the call sites uniform and lets the reverse-engineering review UI filter on `Provenance.Source == SourceInferred`.
 
 **Confidence units**: uint8 chosen for compact storage and because heuristic engines tend to emit normalized 0..1 scores that scale cleanly to 0..255. The exact scoring scheme is reverse-engineering's concern (Plan C / future).
+
+## Master-password vault (Plan B decision record)
+
+**Decision**: a master-password-protected `Vault` inbound port owns every connection profile DSN. The on-disk vault blob at `<UserConfigDir>/electrorangerd/vault.json` holds only AES-GCM ciphertext. Plaintext DSNs never touch disk.
+
+**Cryptographic design**:
+
+- **KDF**: Argon2id via `golang.org/x/crypto/argon2` with OWASP-2024 parameters (1 iteration, 64 MB memory, 4 threads, 16-byte random salt, 32-byte output). Salt is generated once at `Initialize` and re-generated on every `ChangePassword` for forward security.
+- **Symmetric encryption**: AES-256-GCM (`crypto/aes` + `crypto/cipher`). Format on disk is `nonce || ciphertext || auth-tag` per blob; nonces are freshly generated for every encrypt operation.
+- **DEK/KEK pattern**: a randomly generated Data Encryption Key (DEK) encrypts every profile DSN. A Key Encryption Key (KEK) derived from the master password wraps the DEK. Password change re-derives the KEK and re-wraps the DEK — the bulk profile ciphertexts are untouched. This keeps `ChangePassword` O(1) regardless of how many profiles the user has.
+- **Authentication**: AES-GCM's built-in auth tag IS the password check. Wrong password → tag mismatch → `errs.ErrInvalidPassword`. No separate sentinel value is stored.
+
+**OS keychain integration** (opt-in):
+
+- One `internal/adapter/vault/` package with build-tagged files: `keychain_supported.go` (`darwin || windows || linux`) uses `github.com/zalando/go-keyring`; `keychain_unsupported.go` returns `errs.ErrKeychainUnavailable` on every operation. Service / account names: `ElectroRangerD` / `vault-dek`.
+- Stores the DEK directly (not the KEK). The keychain itself provides confidentiality. Password change doesn't require keychain updates because the DEK is unchanged.
+- `EnableKeychain` is opt-in per the user's stated preference; default behavior is "type master password every launch."
+
+**Atomic writes**: `Save` writes to a tempfile in the same directory, chmods to 0600, then renames. Avoids torn writes if the process dies mid-update.
+
+**Concurrency**: the vault service holds a single `sync.Mutex` guarding `status`, `dek`, and `blob`. Every public method takes it. The architect's "core services own their goroutines" rule applies — UI dispatches calls through inbound port methods and never reaches into the vault's internal state.
+
+**What's NOT a separate adapter**: the architect explicitly called against a separate `adapter/keychain` package. Keychain integration is "fallback storage of the master key — same security domain, same lifecycle" as the vault file, so both live in `adapter/vault/`.

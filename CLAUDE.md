@@ -40,9 +40,9 @@ Dictionary (separate document)  // sibling of Project, keyed by DictionaryRef
 
 The scope expansion is delivered as three sequenced plans, NOT one mega-plan:
 
-- **Plan A (foundation, current)** — domain reshape, port signature updates, doc lock-ins. No business logic, no adapter changes beyond signature matching.
-- **Plan B (vault, next)** — `Vault` inbound port + `adapter/vault` (Argon2id + AES-GCM + per-OS build-tagged keychain integration in `os_darwin.go` / `os_windows.go` / `os_linux.go`). `ConnectionProfile.DSN` becomes an opaque encrypted blob.
-- **Plan C (UI shell, after B)** — per-mode UI in `adapter/ui/`: 4-mode state machine, peek panel, mode-local `History` stack, markdown rendering via `gioui.org/x/markdown`, 2.5D canvas, drawer-style buttons.
+- **Plan A (foundation, complete)** — domain reshape, port signature updates, doc lock-ins.
+- **Plan B (vault, complete)** — `Vault` inbound port + `adapter/vault` with Argon2id KDF + AES-GCM encryption + DEK/KEK wrapping; build-tagged OS keychain integration via `github.com/zalando/go-keyring` (macOS Keychain / Windows Credential Manager / Linux Secret Service). On-disk blob is `<UserConfigDir>/electrorangerd/vault.json` (atomic-rename writes, 0600 perms). `domain.ConnectionProfile.EncryptedDSN` replaces plaintext DSN; profiles are stored inside the vault blob, NOT in `domain.Config`.
+- **Plan C (UI shell, next)** — per-mode UI in `adapter/ui/`: 4-mode state machine, peek panel, mode-local `History` stack, markdown rendering via `gioui.org/x/markdown`, 2.5D canvas, drawer-style buttons, master-password prompt at launch (with opt-in keychain auto-unlock).
 
 ## Architecture: hexagonal (ports & adapters)
 
@@ -83,7 +83,8 @@ adapter/  ──►  core/  ──►  port/
 | Anything Gio-specific (rendering, events, widgets) | `internal/adapter/ui/` | Flat until ~8 files, then split by concern (`canvas/`, `panel/`, `dialog/`) — NEVER by Gio primitive |
 | Logging | Inject `*slog.Logger` via constructor — NEVER global, NEVER package-level | |
 | Project JSON shape | `internal/adapter/projectfile/` consumes `domain.Project` | |
-| User pref / connection profile | `internal/domain/config.go` types + `internal/adapter/config/` IO | |
+| User pref (window state, recent files) | `internal/domain/config.go` types + `internal/adapter/config/` IO | |
+| Connection profile (encrypted DSN) | `internal/domain/vault.go` types + `internal/adapter/vault/` IO; access via `port.Vault` only when unlocked | Plaintext DSNs MUST NOT touch disk |
 | Composition wiring | `cmd/electrorangerd/main.go` only | Only place allowed to import concrete adapters + core simultaneously |
 
 ## Conventions
@@ -148,8 +149,7 @@ Plus the usual: `go build ./...`, `go vet ./...`, `go test ./...` from `main/`.
 
 ## Out of scope (don't bolt on without asking)
 
-- **Vault** — Plan B will add the master-password vault: `Vault` inbound port + `adapter/vault` (Argon2id KDF + AES-GCM encryption + optional OS keychain integration via build-tagged `os_darwin.go` / `os_windows.go` / `os_linux.go`). Required at every launch; OS keychain integration is opt-in.
-- **Per-mode UI** — Plan C: the four-mode state machine, peek panel, mode-local History stacks, markdown rendering, drawer animations, the 2.5D canvas itself.
+- **Per-mode UI** — Plan C: the four-mode state machine, peek panel, mode-local History stacks, master-password prompt UI, markdown rendering, drawer animations, the 2.5D canvas itself.
 - **Telemetry beyond `slog`**
 - **Backwards-compat layers / migration shims**
 - **CI workflows**
@@ -161,4 +161,4 @@ Plus the usual: `go build ./...`, `go vet ./...`, `go test ./...` from `main/`.
 
 ## Current state
 
-All scaffolding committed at root commit `04ee086` ("Scaffold ElectroRangerD with hexagonal architecture"). Every service method body returns `errs.ErrNotImplemented`. No business logic anywhere yet. Filling in real logic is per-package and needs its own plan.
+Plans A (foundation reshape) and B (vault) are complete. Every service method body still returns `errs.ErrNotImplemented` except the Vault service, which is fully functional (Initialize / Unlock / Lock / ChangePassword / profile CRUD / OS keychain integration). The UI is still a placeholder Gio window. Plan C (per-mode UI shell) is the next plan.
