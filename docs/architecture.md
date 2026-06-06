@@ -175,10 +175,10 @@ adapter/ui/
 ├── mode.go             # Mode enum + allModes order
 ├── markdown.go         # gioui.org/x/markdown renderer wrapper
 ├── password.go         # master-password gate (Setup / Unlock / KeychainProbe)
-├── view_diagram.go     # ModeDiagramEdit
-├── view_forward.go     # ModeForwardEngineering
-├── view_dictionary.go  # ModeDataDictionary (renders markdown via richtext)
-├── view_reverse.go     # ModeReverseEngineering
+├── view_diagram.go     # ModeDiagram (Diagram Mode)
+├── view_forward.go     # ModeForward (Forward Mode)
+├── view_dictionary.go  # ModeDictionary (Dictionary Mode) — renders markdown via richtext
+├── view_reverse.go     # ModeReverse (Reverse Mode)
 ├── canvas/             # 2.5D ERD canvas (shear math + sheared box)
 ├── panel/              # peek panel + paint helpers
 └── dialog/             # drawer-style button widget

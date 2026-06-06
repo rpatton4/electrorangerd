@@ -22,10 +22,10 @@ when surfacing records.
 - Soft-delete: ` + "`deleted_at`" + ` (timestamptz, nullable)
 `
 
-// dictionaryView is the per-mode view for ModeDataDictionary. It uses the
-// gioui.org/x/markdown renderer to display dictionary entry descriptions as
-// Gio richtext. The dictionary-local History stack lives here; real editing
-// UI arrives in a future iteration.
+// dictionaryView is the per-mode view for ModeDictionary (Dictionary Mode).
+// It uses the gioui.org/x/markdown renderer to display dictionary entry
+// descriptions as Gio richtext. The dictionary-local History stack lives
+// here; real editing UI arrives in a future iteration.
 type dictionaryView struct {
 	dictionary    port.DictionaryService
 	history       port.History

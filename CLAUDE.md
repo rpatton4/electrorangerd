@@ -15,12 +15,12 @@ A Go desktop tool for creating and managing Entity Relationship Diagrams (ERDs).
 
 ElectroRangerD operates in four primary modes, presented as a strict mode switch with a peek panel from any mode (the peek panel can show a slice of another mode for the currently-selected schema element, but the full mode UI never overlaps).
 
-| # | Mode | Purpose | Implementation plan |
-|---|------|---------|---------------------|
-| 1 | Diagram edit | Create and maintain ER diagrams from scratch, no reverse-engineering | Plan C |
-| 2 | Forward engineering | Push diagrams into PostgreSQL databases (multi-schema, multi-DB via Flyway) | Plan C |
-| 3 | Data dictionary | Create and maintain dictionary information for each entity, attribute, and relationship | Plan C |
-| 4 | Reverse engineering | Build an ER diagram from an existing data source with multiple schemas | Plan C |
+| # | Mode | Purpose | Status |
+|---|------|---------|--------|
+| 1 | **Diagram Mode** | Create and maintain ER diagrams from scratch, no reverse-engineering | Implemented (Plan C) |
+| 2 | **Forward Mode** | Forward-engineer diagrams into PostgreSQL databases (multi-schema, multi-DB via Flyway) | Implemented (Plan C) |
+| 3 | **Dictionary Mode** | Create and maintain data dictionary information for each entity, attribute, and relationship | Implemented (Plan C) |
+| 4 | **Reverse Mode** | Reverse-engineer an ER diagram from an existing data source with multiple schemas | Implemented (Plan C) |
 
 ### Data model hierarchy
 

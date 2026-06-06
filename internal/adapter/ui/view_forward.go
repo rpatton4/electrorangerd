@@ -9,9 +9,9 @@ import (
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
 )
 
-// forwardView is the per-mode view for ModeForwardEngineering. It owns no
-// History stack — forward engineering is a one-shot operation that reviews
-// a MigrationPlan rather than an edit session.
+// forwardView is the per-mode view for ModeForward (Forward Mode). It owns
+// no History stack — forward engineering is a one-shot operation that
+// reviews a MigrationPlan rather than an edit session.
 type forwardView struct {
 	forward port.ForwardEngineer
 	drawer  *dialog.Drawer

@@ -8,7 +8,7 @@ import (
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
 )
 
-// reverseView is the per-mode view for ModeReverseEngineering. Like the
+// reverseView is the per-mode view for ModeReverse (Reverse Mode). Like the
 // forward view it owns no History stack — reverse-engineering produces a
 // Project as a one-shot output the user accepts or discards.
 type reverseView struct {

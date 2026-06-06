@@ -9,9 +9,9 @@ import (
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
 )
 
-// diagramView is the per-mode view for ModeDiagramEdit. It holds the 2.5D
-// canvas and the diagram-local History stack. Real per-entity walks and
-// editing arrive in a future iteration.
+// diagramView is the per-mode view for ModeDiagram (Diagram Mode). It holds
+// the 2.5D canvas and the diagram-local History stack. Real per-entity walks
+// and editing arrive in a future iteration.
 type diagramView struct {
 	history port.History
 	canvas  *canvas.Canvas

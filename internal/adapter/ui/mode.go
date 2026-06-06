@@ -3,25 +3,32 @@ package ui
 // Mode identifies one of the four primary application modes. Mode is a UI
 // concern; the domain layer never carries this enum. Per CLAUDE.md, rule-
 // selection in the domain happens through domain.ValidationProfile instead.
+//
+// The canonical names used in conversation and documentation are
+// "Diagram Mode", "Forward Mode", "Dictionary Mode", and "Reverse Mode".
+// In code the identifiers are bare (ModeDiagram, etc.) because the type
+// name already supplies the "Mode" qualifier.
 type Mode int
 
 const (
-	ModeDiagramEdit Mode = iota
-	ModeForwardEngineering
-	ModeDataDictionary
-	ModeReverseEngineering
+	ModeDiagram Mode = iota
+	ModeForward
+	ModeDictionary
+	ModeReverse
 )
 
 // Label returns a short human-readable name suitable for the top mode nav.
+// The bare label is intentional — the nav IS the mode switcher, so the
+// "Mode" suffix would be redundant on the button.
 func (m Mode) Label() string {
 	switch m {
-	case ModeDiagramEdit:
+	case ModeDiagram:
 		return "Diagram"
-	case ModeForwardEngineering:
+	case ModeForward:
 		return "Forward"
-	case ModeDataDictionary:
+	case ModeDictionary:
 		return "Dictionary"
-	case ModeReverseEngineering:
+	case ModeReverse:
 		return "Reverse"
 	default:
 		return "Unknown"
@@ -30,8 +37,8 @@ func (m Mode) Label() string {
 
 // allModes is the canonical ordering used by the mode navigator.
 var allModes = [...]Mode{
-	ModeDiagramEdit,
-	ModeForwardEngineering,
-	ModeDataDictionary,
-	ModeReverseEngineering,
+	ModeDiagram,
+	ModeForward,
+	ModeDictionary,
+	ModeReverse,
 }

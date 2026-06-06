@@ -86,7 +86,7 @@ func NewApp(
 		dictionaryHistory: dictionaryHist,
 		log:               log,
 		theme:             NewTheme(),
-		mode:              ModeDiagramEdit,
+		mode:              ModeDiagram,
 	}
 	a.peek = panel.New(dict)
 	return a
@@ -223,13 +223,13 @@ func (a *App) layoutModeNav(gtx layout.Context) layout.Dimensions {
 func (a *App) layoutCurrentView(gtx layout.Context) layout.Dimensions {
 	th := a.theme.Material
 	switch a.mode {
-	case ModeDiagramEdit:
+	case ModeDiagram:
 		return a.diagramView.Layout(gtx, th)
-	case ModeForwardEngineering:
+	case ModeForward:
 		return a.forwardView.Layout(gtx, th)
-	case ModeDataDictionary:
+	case ModeDictionary:
 		return a.dictionaryView.Layout(gtx, th)
-	case ModeReverseEngineering:
+	case ModeReverse:
 		return a.reverseView.Layout(gtx, th)
 	}
 	return layout.Dimensions{}
