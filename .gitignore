@@ -1,0 +1,19 @@
+# binaries
+/electrorangerd
+/bin/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# macOS
+.DS_Store
+
+# Go test/build cache (usually outside repo but just in case)
+/cover.out
+/coverage/
+
+# Local env/secrets
+.env
+.env.local
