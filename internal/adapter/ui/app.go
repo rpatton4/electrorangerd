@@ -14,7 +14,6 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
-	"gioui.org/widget/material"
 
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/panel"
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
@@ -22,14 +21,13 @@ import (
 )
 
 // screenType distinguishes the top-level UI surfaces inside the app shell.
-// The welcome chooser is the initial screen at launch; the password screen
-// fires when the user picks a mode but the vault is not yet unlocked; the
-// mode shell is the existing nav + active-mode view + peek panel.
+// The master-password gate runs unconditionally before either screen — it
+// is a precondition, not a screen state. After unlock the welcome chooser
+// is the first surface; picking a mode advances to the mode shell.
 type screenType int
 
 const (
 	screenWelcome screenType = iota
-	screenPassword
 	screenMode
 )
 
@@ -59,13 +57,19 @@ type App struct {
 	password *passwordView
 
 	// Screen state — welcome chooser vs. active-mode shell.
-	screen    screenType
-	homeClick widget.Clickable
+	screen screenType
 
 	// Mode state.
-	mode       Mode
-	modeClicks [len(allModes)]widget.Clickable
-	peekToggle widget.Clickable
+	mode Mode
+
+	// Nav state — single circular button at the mode-shell bottom. Click
+	// toggles the menu overlay (the larger chrome dial with the four mode
+	// labels) which floats centred on top of the mode shell.
+	navClick   widget.Clickable
+	navButton  paint.ImageOp
+	menuOpen   bool
+	menuClick  widget.Clickable
+	menuButton paint.ImageOp
 
 	// Per-mode views (built after the password gate clears).
 	welcomeView    *welcomeView
@@ -148,9 +152,10 @@ func (a *App) loop(w *app.Window) error {
 	}
 }
 
-// frame is called once per FrameEvent. It fills the background, ensures the
-// views are constructed on the first frame, and dispatches to the current
-// screen (welcome chooser, password gate, or mode shell).
+// frame is called once per FrameEvent. It fills the background, ensures
+// the views are constructed on the first frame, gates unconditionally on
+// the master-password prompt, and (once unlocked) dispatches to the
+// current screen (welcome chooser or mode shell).
 func (a *App) frame(gtx layout.Context) {
 	a.fillBackground(gtx, a.theme.Surface)
 
@@ -159,23 +164,16 @@ func (a *App) frame(gtx layout.Context) {
 		a.password.tryKeychainUnlock(context.Background())
 	}
 
-	// Advance from the password screen to the mode shell as soon as unlock
-	// completes — covers both the explicit Unlock/Create-vault click and the
-	// opt-in keychain auto-unlock that fires on the first frame.
-	if a.screen == screenPassword && a.password.Done() {
-		a.screen = screenMode
+	if !a.password.Done() {
+		a.password.Layout(gtx, a.theme)
+		return
 	}
 
 	switch a.screen {
 	case screenWelcome:
 		a.welcomeView.Layout(gtx, a.theme)
-	case screenPassword:
-		a.password.Layout(gtx, a.theme)
 	case screenMode:
 		layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.layoutModeNav(gtx)
-			}),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -186,7 +184,13 @@ func (a *App) frame(gtx layout.Context) {
 					}),
 				)
 			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutModeNav(gtx)
+			}),
 		)
+		if a.menuOpen {
+			a.layoutMenuOverlay(gtx)
+		}
 	}
 }
 
@@ -195,13 +199,11 @@ func (a *App) frame(gtx layout.Context) {
 // a.password serves as the "first frame" sentinel.
 func (a *App) initViews() {
 	a.password = newPasswordView(a.vault, a.log)
+	a.navButton = decodeNavButton(a.log)
+	a.menuButton = decodeMenuButton(a.log)
 	a.welcomeView = newWelcomeView(func(m Mode) {
 		a.mode = m
-		if a.password.Done() {
-			a.screen = screenMode
-		} else {
-			a.screen = screenPassword
-		}
+		a.screen = screenMode
 	})
 	a.diagramView = newDiagramView(a.diagramHistory)
 	a.forwardView = newForwardView(a.forward)
@@ -216,53 +218,52 @@ func (a *App) fillBackground(gtx layout.Context, c color.NRGBA) {
 	rect.Pop()
 }
 
-// layoutModeNav draws the top navigation bar with one button per mode and a
-// peek-toggle button at the right.
+// layoutModeNav draws the bottom navigation bar — a single circular button
+// rendered from the embedded chrome PNG, centred horizontally. Clicking
+// it toggles the menu overlay (see layoutMenuOverlay).
 func (a *App) layoutModeNav(gtx layout.Context) layout.Dimensions {
-	return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		if a.homeClick.Clicked(gtx) {
-			a.screen = screenWelcome
-		}
+	if a.navClick.Clicked(gtx) {
+		a.menuOpen = !a.menuOpen
+	}
 
-		children := make([]layout.FlexChild, 0, len(allModes)*2+4)
-		children = append(children,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return material.Button(a.theme.Material, &a.homeClick, "Home").Layout(gtx)
-			}),
-			layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
-		)
-		for i, m := range allModes {
-			i, m := i, m
-			if a.modeClicks[i].Clicked(gtx) {
-				a.mode = m
-			}
-			label := m.Label()
-			if a.mode == m {
-				label = "▸ " + label
-			}
-			children = append(children,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return material.Button(a.theme.Material, &a.modeClicks[i], label).Layout(gtx)
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-			)
-		}
-		children = append(children,
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return layout.Dimensions{Size: gtx.Constraints.Min}
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if a.peekToggle.Clicked(gtx) {
-					a.peek.Open = !a.peek.Open
-				}
-				label := "Peek ▸"
-				if a.peek.Open {
-					label = "Peek ▾"
-				}
-				return material.Button(a.theme.Material, &a.peekToggle, label).Layout(gtx)
-			}),
-		)
-		return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+	return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return a.navClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				sz := gtx.Dp(unit.Dp(56))
+				size := image.Pt(sz, sz)
+				gtx.Constraints = layout.Exact(size)
+
+				defer clip.Ellipse{Max: size}.Push(gtx.Ops).Pop()
+				return widget.Image{
+					Src:      a.navButton,
+					Fit:      widget.Cover,
+					Position: layout.Center,
+				}.Layout(gtx)
+			})
+		})
+	})
+}
+
+// layoutMenuOverlay renders the larger chrome dial (with the four mode
+// labels around the rim) floating centred on top of the mode shell. The
+// dial's transparency comes from the decoder's inscribed-circle mask —
+// no render-time clip needed. The click is registered but currently does
+// nothing; tap the bottom nav button again to dismiss.
+func (a *App) layoutMenuOverlay(gtx layout.Context) layout.Dimensions {
+	_ = a.menuClick.Clicked(gtx) // consume; menu does nothing yet
+
+	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return a.menuClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			sz := gtx.Dp(unit.Dp(320))
+			size := image.Pt(sz, sz)
+			gtx.Constraints = layout.Exact(size)
+
+			return widget.Image{
+				Src:      a.menuButton,
+				Fit:      widget.Cover,
+				Position: layout.Center,
+			}.Layout(gtx)
+		})
 	})
 }
 

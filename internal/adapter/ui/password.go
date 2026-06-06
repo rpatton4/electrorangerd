@@ -114,13 +114,15 @@ func (v *passwordView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimens
 		v.focusRequested = true
 	}
 
-	title := "Unlock master vault"
-	help := "Enter your master password to unlock the connection vault."
+	title := "unlock the vault"
+	help := ""
 	button := "Unlock"
+	hint := "insert your key"
 	if v.phase == pwPhaseSetup {
-		title = "Set master password"
-		help = "Choose a master password. It encrypts every database connection profile and is required at every launch unless you opt in to the OS keychain."
+		title = "welcome to your design grid"
+		help = "choose your key, this will encrypt all sensitive info"
 		button = "Create vault"
+		hint = "new key"
 	}
 
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -129,10 +131,15 @@ func (v *passwordView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimens
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(material.H5(th.Material, title).Layout),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(material.Body2(th.Material, help).Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if help == "" {
+						return layout.Spacer{Height: unit.Dp(17)}.Layout(gtx)
+					}
+					return material.Body2(th.Material, help).Layout(gtx)
+				}),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return v.layoutEditor(gtx, th)
+					return v.layoutEditor(gtx, th, hint)
 				}),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 				layout.Rigid(material.Button(th.Material, &v.submit, button).Layout),
@@ -150,10 +157,10 @@ func (v *passwordView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimens
 }
 
 // layoutEditor draws the password input with a visible bordered chrome, a
-// focus-aware accent on the border, and an italic "master password" hint
-// overlaid on the editor when the field is empty. The hint disappears as
-// soon as the user types and reappears if they clear the field.
-func (v *passwordView) layoutEditor(gtx layout.Context, th *theme.Theme) layout.Dimensions {
+// focus-aware accent on the border, and an italic hint overlaid on the
+// editor when the field is empty. The hint disappears as soon as the user
+// types and reappears if they clear the field.
+func (v *passwordView) layoutEditor(gtx layout.Context, th *theme.Theme, hintText string) layout.Dimensions {
 	borderColor := th.Outline
 	if gtx.Focused(&v.editor) {
 		borderColor = th.Primary
@@ -174,7 +181,7 @@ func (v *passwordView) layoutEditor(gtx layout.Context, th *theme.Theme) layout.
 					if v.editor.Text() != "" {
 						return layout.Dimensions{}
 					}
-					hint := material.Body1(th.Material, "master password")
+					hint := material.Body1(th.Material, hintText)
 					hint.Font.Style = font.Italic
 					hint.Color = th.OnSurfaceVariant
 					return hint.Layout(gtx)
