@@ -18,13 +18,16 @@ import (
 
 // EntityPalette is the colour set Canvas.Entity paints with. The caller
 // builds it from its own theme.Theme — keeping the canvas package free of
-// any dependency on internal/adapter/ui/theme.
+// any dependency on internal/adapter/ui/theme. Selection is the accent
+// used by Canvas.EntitySelection to draw the bold outline and attachment
+// handles around a selected entity.
 type EntityPalette struct {
 	Surface       color.NRGBA
 	HeaderSurface color.NRGBA
 	Stroke        color.NRGBA
 	OnSurface     color.NRGBA
 	Shadow        color.NRGBA
+	Selection     color.NRGBA
 }
 
 // Entity renders a single ERD entity at the current transform origin as a
@@ -129,4 +132,39 @@ func textInArea(gtx layout.Context, r image.Rectangle, body func(gtx layout.Cont
 
 func keyMarker(a domain.Attribute) string {
 	return a.KeyKind.String()
+}
+
+// EntitySelection paints the selection chrome over an entity already drawn
+// at the current transform origin: a thicker accent outline and eight small
+// attachment-point circles, two per side at the 1/3 and 2/3 marks. The
+// circles are the anchor points future relationship lines will hook onto.
+func (c *Canvas) EntitySelection(gtx layout.Context, p EntityPalette, e domain.Entity) {
+	headerH := gtx.Dp(unit.Dp(28))
+	rowH := gtx.Dp(unit.Dp(24))
+	boxW := gtx.Dp(unit.Dp(220))
+	rows := len(e.Attributes)
+	boxH := headerH + rows*rowH
+	size := image.Pt(boxW, boxH)
+
+	boldStroke := gtx.Dp(unit.Dp(2))
+	strokeOutline(gtx, size, boldStroke, p.Selection)
+
+	radius := gtx.Dp(unit.Dp(4))
+	// Top + bottom edges: 1/3 and 2/3 along X.
+	drawHandle(gtx, image.Pt(boxW/3, 0), radius, p.Selection)
+	drawHandle(gtx, image.Pt(2*boxW/3, 0), radius, p.Selection)
+	drawHandle(gtx, image.Pt(boxW/3, boxH), radius, p.Selection)
+	drawHandle(gtx, image.Pt(2*boxW/3, boxH), radius, p.Selection)
+	// Left + right edges: 1/3 and 2/3 along Y.
+	drawHandle(gtx, image.Pt(0, boxH/3), radius, p.Selection)
+	drawHandle(gtx, image.Pt(0, 2*boxH/3), radius, p.Selection)
+	drawHandle(gtx, image.Pt(boxW, boxH/3), radius, p.Selection)
+	drawHandle(gtx, image.Pt(boxW, 2*boxH/3), radius, p.Selection)
+}
+
+func drawHandle(gtx layout.Context, centre image.Point, radius int, col color.NRGBA) {
+	bb := image.Rect(centre.X-radius, centre.Y-radius, centre.X+radius, centre.Y+radius)
+	defer clip.Ellipse{Min: bb.Min, Max: bb.Max}.Push(gtx.Ops).Pop()
+	paint.ColorOp{Color: col}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
 }

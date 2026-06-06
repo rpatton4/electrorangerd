@@ -106,6 +106,12 @@ type diagramView struct {
 	hovering bool
 	hoverPos f32.Point
 
+	// selected identifies the currently selected entity. Selection is
+	// UI-only state — the domain doesn't carry a notion of selection,
+	// because it's a view concern, not a project-state concern. Zero
+	// means no selection.
+	selected domain.EntityID
+
 	lastPressAt  time.Time
 	lastPressPos f32.Point
 }
@@ -162,6 +168,9 @@ func (v *diagramView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensi
 		}
 		stk := op.Affine(f32.Affine2D{}.Offset(f32.Pt(pos.X, pos.Y))).Push(gtx.Ops)
 		v.canvas.Entity(gtx, th.Material, palette, ent)
+		if v.selected == ent.ID {
+			v.canvas.EntitySelection(gtx, palette, ent)
+		}
 		if v.edit.kind != editNone && v.edit.entityID == ent.ID {
 			v.layoutEditOverlay(gtx, th)
 		}
@@ -304,6 +313,7 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 	}
 
 	if id, hit := v.hitEntity(gtx, pe.Position); hit {
+		v.selected = id
 		pos, _ := v.project.Diagram.Placements[id]
 		v.dragging = true
 		v.dragID = id
@@ -312,6 +322,8 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 			X: pe.Position.X - pos.X,
 			Y: pe.Position.Y - pos.Y,
 		}
+	} else {
+		v.selected = 0
 	}
 }
 
@@ -780,5 +792,6 @@ func entityPalette(th *theme.Theme) canvas.EntityPalette {
 		Stroke:        th.Outline,
 		OnSurface:     th.OnSurface,
 		Shadow:        color.NRGBA{A: 0x40},
+		Selection:     th.Primary,
 	}
 }
