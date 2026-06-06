@@ -27,12 +27,51 @@ import (
 // scrim alpha fades in alongside.
 const openDuration = 500 * time.Millisecond
 
+// sectorRingInner is the inner edge of the annulus the four ring
+// sectors occupy, expressed as a fraction of the wheel radius. The
+// outer edge is the inscribed-circle radius (1.0). Centred labels on
+// the menu image fall inside this band, so 0.7 is a generous "outer
+// ring" hit area.
+const sectorRingInner = 0.7
+
+// Sector identifies which of the four ring sectors of the mode wheel
+// the user tapped. The labels are positioned at the cardinal points:
+// Diagram at top, Forward at left, Dictionary at right, Reverse at
+// bottom. Each sector spans 90° centred on its label.
+type Sector int
+
+const (
+	SectorDiagram Sector = iota
+	SectorForward
+	SectorDictionary
+	SectorReverse
+)
+
+// String returns the spoken label for the sector.
+func (s Sector) String() string {
+	switch s {
+	case SectorDiagram:
+		return "Diagram"
+	case SectorForward:
+		return "Forward"
+	case SectorDictionary:
+		return "Dictionary"
+	case SectorReverse:
+		return "Reverse"
+	default:
+		return "Unknown"
+	}
+}
+
 // InfoMenu owns the state, click handlers, and embedded chrome
 // images needed by the navigation element. A single InfoMenu instance
 // is meant to live for the lifetime of an App and be reused across
-// every screen that surfaces the nav button.
+// every screen that surfaces the nav button. The onSelect callback
+// fires whenever the user taps one of the four ring sectors; the
+// overlay context auto-dismisses after a sector tap.
 type InfoMenu struct {
-	log *slog.Logger
+	log      *slog.Logger
+	onSelect func(Sector)
 
 	open     bool
 	openedAt time.Time
@@ -46,12 +85,59 @@ type InfoMenu struct {
 }
 
 // New builds an InfoMenu with the embedded chrome assets decoded
-// ready for paint.
-func New(log *slog.Logger) *InfoMenu {
+// ready for paint. onSelect is invoked when the user taps one of the
+// four ring sectors on the menu wheel; pass nil to ignore sector
+// taps.
+func New(log *slog.Logger, onSelect func(Sector)) *InfoMenu {
 	return &InfoMenu{
 		log:       log,
+		onSelect:  onSelect,
 		navImage:  decodeNavButton(log),
 		menuImage: decodeMenuButton(log),
+	}
+}
+
+// resolveLastPressSector inspects the latest press on the menu
+// wheel and returns the sector under it. Returns false when the
+// press landed inside the centre (not on the outer ring) or no
+// press has been recorded.
+func (m *InfoMenu) resolveLastPressSector(sz int) (Sector, bool) {
+	presses := m.menuClick.History()
+	if len(presses) == 0 {
+		return 0, false
+	}
+	last := presses[len(presses)-1]
+	return resolveSector(last.Position.X, last.Position.Y, sz)
+}
+
+// resolveSector returns the ring sector under a press at (px, py) in
+// the local coordinates of a wheel sized sz × sz. The wheel centre is
+// at (sz/2, sz/2); the outer ring annulus extends from
+// sz/2 * sectorRingInner to sz/2 in radius. Each sector spans 90°
+// centred on its label's cardinal direction (Diagram=top,
+// Forward=left, Dictionary=right, Reverse=bottom).
+func resolveSector(px, py, sz int) (Sector, bool) {
+	cx := float64(sz) / 2
+	cy := float64(sz) / 2
+	dx := float64(px) - cx
+	dy := float64(py) - cy
+	radius := math.Sqrt(dx*dx + dy*dy)
+	maxRadius := float64(sz) / 2
+
+	if radius < maxRadius*sectorRingInner || radius > maxRadius {
+		return 0, false
+	}
+
+	angle := math.Atan2(dy, dx)
+	switch {
+	case angle >= -math.Pi/4 && angle < math.Pi/4:
+		return SectorDictionary, true
+	case angle >= math.Pi/4 && angle < 3*math.Pi/4:
+		return SectorReverse, true
+	case angle >= 3*math.Pi/4 || angle < -3*math.Pi/4:
+		return SectorForward, true
+	default:
+		return SectorDiagram, true
 	}
 }
 
@@ -82,11 +168,11 @@ func (m *InfoMenu) LayoutInfoArea(gtx layout.Context) layout.Dimensions {
 	areaH := gtx.Dp(unit.Dp(100))
 	btnSz := gtx.Dp(unit.Dp(56))
 	cx := areaW / 2
-	baselineY := gtx.Dp(unit.Dp(30))
-	bumpApexY := gtx.Dp(unit.Dp(0))
+	baselineY := gtx.Dp(unit.Dp(62))
+	bumpApexY := gtx.Dp(unit.Dp(32))
 	bumpHalfW := gtx.Dp(unit.Dp(75))
 	strokeW := float32(gtx.Dp(unit.Dp(2)))
-	btnY := gtx.Dp(unit.Dp(7))
+	btnY := gtx.Dp(unit.Dp(39))
 
 	// Build the horizon path: flat segment, smooth cubic bump up to
 	// apex, mirror bump back down, flat segment. Each half of the
@@ -143,12 +229,28 @@ func (m *InfoMenu) LayoutInfoArea(gtx layout.Context) layout.Dimensions {
 // than openDuration in the past) to render the wheel statically at
 // full size. The wheel is the chrome dial with the four mode labels
 // — reusable so any screen (e.g. the welcome chooser) can present
-// the wheel as a focal element without the overlay's scrim. Clicks
-// on the four label sectors land in a future iteration.
+// the wheel as a focal element without the overlay's scrim. Taps on
+// the four label sectors fire onSelect.
 func (m *InfoMenu) LayoutWheel(gtx layout.Context, sizeDp unit.Dp, animStart time.Time) layout.Dimensions {
 	sz := gtx.Dp(sizeDp)
+	if m.menuClick.Clicked(gtx) {
+		if sector, ok := m.resolveLastPressSector(sz); ok && m.onSelect != nil {
+			// onSelect mutates host state (e.g. switching screens);
+			// gio doesn't auto-fire a follow-up frame after a state
+			// mutation, so without this invalidate the user has to
+			// click a second time before the new screen renders.
+			m.onSelect(sector)
+			gtx.Execute(op.InvalidateCmd{})
+		}
+	}
+
 	progress := m.animationProgress(gtx, animStart)
-	return m.renderWheel(gtx, sz, progress)
+
+	size := image.Pt(sz, sz)
+	defer clip.Ellipse{Max: size}.Push(gtx.Ops).Pop()
+	return m.menuClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return m.renderWheel(gtx, sz, progress)
+	})
 }
 
 // animationProgress returns the 0..1 progress of an open animation
@@ -207,7 +309,22 @@ func (m *InfoMenu) LayoutOverlay(gtx layout.Context) layout.Dimensions {
 		return layout.Dimensions{}
 	}
 
-	_ = m.menuClick.Clicked(gtx) // consume; wheel does nothing yet
+	const overlayWheelDp = 320
+	sz := gtx.Dp(unit.Dp(overlayWheelDp))
+
+	if m.menuClick.Clicked(gtx) {
+		// Sector tap: pick the mode and dismiss the overlay so the
+		// user sees the new mode shell behind. Centre taps land
+		// inside the wheel but outside the ring and are ignored.
+		if sector, ok := m.resolveLastPressSector(sz); ok {
+			if m.onSelect != nil {
+				m.onSelect(sector)
+			}
+			m.open = false
+			gtx.Execute(op.InvalidateCmd{})
+			return layout.Dimensions{}
+		}
+	}
 	if m.scrimClick.Clicked(gtx) {
 		// Close now AND skip painting the overlay this frame —
 		// otherwise the current frame still commits scrim + wheel
@@ -232,7 +349,6 @@ func (m *InfoMenu) LayoutOverlay(gtx layout.Context) layout.Dimensions {
 	})
 
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		sz := gtx.Dp(unit.Dp(320))
 		size := image.Pt(sz, sz)
 
 		// Restrict the menu's click area to the inscribed circle so

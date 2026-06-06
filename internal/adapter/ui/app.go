@@ -193,7 +193,10 @@ func (a *App) frame(gtx layout.Context) {
 // a.password serves as the "first frame" sentinel.
 func (a *App) initViews() {
 	a.password = newPasswordView(a.vault, a.log)
-	a.infoMenu = infomenu.New(a.log)
+	a.infoMenu = infomenu.New(a.log, func(s infomenu.Sector) {
+		a.mode = sectorToMode(s)
+		a.screen = screenMode
+	})
 	a.welcomeView = newWelcomeView(a.infoMenu)
 	a.diagramView = newDiagramView(a.diagramHistory)
 	a.forwardView = newForwardView(a.forward)
@@ -220,4 +223,23 @@ func (a *App) layoutCurrentView(gtx layout.Context) layout.Dimensions {
 		return a.reverseView.Layout(gtx, a.theme)
 	}
 	return layout.Dimensions{}
+}
+
+// sectorToMode maps an infomenu.Sector (the wheel's ring-section
+// identifier) to the corresponding application Mode. Used by the
+// InfoMenu's onSelect callback so the wheel can drive mode
+// transitions without infomenu depending on the ui.Mode type.
+func sectorToMode(s infomenu.Sector) Mode {
+	switch s {
+	case infomenu.SectorDiagram:
+		return ModeDiagram
+	case infomenu.SectorForward:
+		return ModeForward
+	case infomenu.SectorDictionary:
+		return ModeDictionary
+	case infomenu.SectorReverse:
+		return ModeReverse
+	default:
+		return ModeDiagram
+	}
 }
