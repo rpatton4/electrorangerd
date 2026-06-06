@@ -2,24 +2,19 @@ package diagram
 
 import "github.com/InfiniteSkye/electrorangerd/internal/domain"
 
-// Position is a 2-D point on the ERD canvas, expressed in device-independent
-// pixels. Both axes increase toward the bottom-right.
-type Position struct {
-	X, Y float32
-}
-
 // Box is the bounding rectangle of a single entity node on the canvas. It
-// embeds Position for the top-left corner and adds the node dimensions.
+// pairs the entity's top-left placement with the box's dimensions. The
+// placement itself lives on domain.Diagram.Placements; Box materialises it
+// alongside size for layout and hit-test consumers.
 type Box struct {
-	Position
+	domain.Position
 	Width, Height float32
 }
 
 // Auto computes an initial layout for every entity in a Project, returning a
-// map from fully-qualified EntityRef to its assigned Box. EntityRef keys
-// disambiguate entities whose names collide across databases or schemas. The
-// current implementation is a stub that returns nil; the real algorithm
-// (force-directed or grid) will replace it without changing the signature.
-func Auto(_ domain.Project) map[domain.EntityRef]Box {
+// map from EntityID to its assigned Box. The current implementation is a
+// stub that returns nil; the real algorithm (force-directed or grid) will
+// replace it without changing the signature.
+func Auto(_ domain.Project) map[domain.EntityID]Box {
 	return nil
 }

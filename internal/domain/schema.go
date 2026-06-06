@@ -2,15 +2,41 @@
 // of the electrorangerd data model.
 package domain
 
+// EntityID is a project-unique, stable identifier for an Entity. It is
+// assigned by the DiagramEditor service when an entity is created and
+// survives renames, position changes, and cross-database moves. Zero is
+// the unassigned sentinel — entities loaded from external sources without
+// an ID are assigned one when they enter the editor.
+type EntityID uint32
+
+// RelationshipID is the analogous stable identifier for a Relationship.
+type RelationshipID uint32
+
+// Position is a 2-D point on the ERD canvas, expressed in device-independent
+// pixels. Both axes increase toward the bottom-right.
+type Position struct {
+	X, Y float32
+}
+
+// Diagram is the visual / placement aggregate for a Project. It maps each
+// entity (by ID) to its top-left position on the canvas. Entities without a
+// placement are still part of the project; they just haven't been drawn yet
+// (typical for reverse-engineered projects before the user opens them).
+type Diagram struct {
+	Placements map[EntityID]Position
+}
+
 // Project is the top-level container — an ERD project. A project models one
 // or more target PostgreSQL databases, each holding one or more schema
 // namespaces. Relationships live at the project level so they may cross
 // schemas and databases (modelled for documentation; Flyway cannot enforce
-// cross-database foreign keys).
+// cross-database foreign keys). The Diagram aggregate carries layout state
+// for the project's entities.
 type Project struct {
 	Name          string
 	Databases     []Database
 	Relationships []Relationship
+	Diagram       Diagram
 }
 
 // Database represents a single PostgreSQL database target within a Project.
@@ -29,8 +55,11 @@ type Schema struct {
 	Entities []Entity
 }
 
-// Entity represents a single database table.
+// Entity represents a single database table. ID is the project-unique stable
+// identifier assigned by the DiagramEditor; it survives renames so placements
+// and relationships can reliably refer back to the entity.
 type Entity struct {
+	ID          EntityID
 	Name        string
 	Attributes  []Attribute
 	Indexes     []Index
@@ -73,14 +102,25 @@ func (k KeyKind) String() string {
 	return ""
 }
 
+// RelationshipEndpoint identifies one side of a Relationship by the entity's
+// stable ID plus, optionally, the participating attribute's name within that
+// entity. Endpoints reference entities by ID (not EntityRef) because EntityID
+// is project-unique and works naturally across database / schema boundaries.
+type RelationshipEndpoint struct {
+	Entity    EntityID
+	Attribute string
+}
+
 // Relationship describes an association between two entities. Crow's foot
 // notation requires cardinality and optionality at each endpoint as
 // independent axes. Provenance records whether the relationship was declared
 // explicitly, inferred by reverse-engineering heuristics, or added manually.
+// ID is the project-unique stable identifier.
 type Relationship struct {
+	ID                RelationshipID
 	Name              string
-	From              EntityRef
-	To                EntityRef
+	From              RelationshipEndpoint
+	To                RelationshipEndpoint
 	SourceCardinality Cardinality
 	SourceOptionality Optionality
 	TargetCardinality Cardinality

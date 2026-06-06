@@ -24,6 +24,10 @@ func (s *historyService) Push(cmd domain.Command) {
 	s.redoStack = s.redoStack[:0]
 }
 
+// Undo and Redo are stubs. Real invertibility requires either before/after
+// project snapshots or per-command inverse operations; both are
+// non-trivial design work in their own right, and a half-implementation
+// (Push working, replay broken) is worse than honest stubs.
 func (s *historyService) Undo() (domain.Command, bool) {
 	return domain.Command{}, false
 }

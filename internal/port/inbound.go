@@ -42,9 +42,26 @@ type ProjectService interface {
 // Methods are pure transformations: given a Project, they return a new
 // Project reflecting the edit. The UI applies the returned Project to its
 // in-memory state and pushes a domain.Command onto the History stack.
+//
+// AddEntity and AddRelationship assign and return a fresh, project-unique
+// ID so callers can use it without re-walking the project tree. Update and
+// Delete methods address entities and relationships by that ID; identity is
+// stable across renames, position changes, and cross-database moves.
+//
+// Invariants enforced by the service:
+//   - Relationship endpoints must reference existing entities by ID.
+//   - DeleteEntity cascades — its placement entry and every relationship that
+//     references it are removed alongside the entity.
+//   - UpdatePlacement requires the target entity to exist.
 type DiagramEditor interface {
-	AddEntity(ctx context.Context, project domain.Project, db, schema string, entity domain.Entity) (domain.Project, error)
-	UpdateEntity(ctx context.Context, project domain.Project, db, schema string, entityIdx int, entity domain.Entity) (domain.Project, error)
+	AddEntity(ctx context.Context, project domain.Project, db, schema string, entity domain.Entity) (domain.Project, domain.EntityID, error)
+	UpdateEntity(ctx context.Context, project domain.Project, id domain.EntityID, entity domain.Entity) (domain.Project, error)
+	DeleteEntity(ctx context.Context, project domain.Project, id domain.EntityID) (domain.Project, error)
+	UpdatePlacement(ctx context.Context, project domain.Project, id domain.EntityID, pos domain.Position) (domain.Project, error)
+
+	AddRelationship(ctx context.Context, project domain.Project, rel domain.Relationship) (domain.Project, domain.RelationshipID, error)
+	UpdateRelationship(ctx context.Context, project domain.Project, id domain.RelationshipID, rel domain.Relationship) (domain.Project, error)
+	DeleteRelationship(ctx context.Context, project domain.Project, id domain.RelationshipID) (domain.Project, error)
 }
 
 // Validator checks a Project for logical and structural problems under a

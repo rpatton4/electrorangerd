@@ -22,7 +22,6 @@ import (
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/canvas"
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/dialog"
 	"github.com/InfiniteSkye/electrorangerd/internal/adapter/ui/theme"
-	"github.com/InfiniteSkye/electrorangerd/internal/diagram"
 	"github.com/InfiniteSkye/electrorangerd/internal/domain"
 	"github.com/InfiniteSkye/electrorangerd/internal/port"
 )
@@ -50,13 +49,14 @@ const (
 	editAttrName
 )
 
-// editTarget addresses what is currently being edited: a kind tells us
-// which sub-area, entityIdx selects the entity in the default schema, and
-// attrIdx selects the attribute row when relevant.
+// editTarget addresses what is currently being edited or what the active
+// context menu was opened on. kind selects the sub-area, entityID identifies
+// the entity (the diagram-stable EntityID), attrIdx selects the attribute
+// row when relevant.
 type editTarget struct {
-	kind      editKind
-	entityIdx int
-	attrIdx   int
+	kind     editKind
+	entityID domain.EntityID
+	attrIdx  int
 }
 
 // entitySub names which sub-area of an entity a pointer hit.
@@ -70,16 +70,17 @@ const (
 )
 
 // diagramView is the per-mode view for ModeDiagram. It owns the in-memory
-// domain.Project, the per-entity placement boxes, the flat canvas renderer,
-// the right-click context menu, the in-line text editor + key-marker
-// dropdown, and the diagram-local History stack.
+// domain.Project (entities, attributes, relationships, AND per-entity
+// placements via project.Diagram), the canvas renderer, four context menus,
+// the in-line text editor, and the diagram-local History stack. All
+// project mutations go through the DiagramEditor port; the view never
+// mutates project state in place.
 type diagramView struct {
 	diagramEditor port.DiagramEditor
 	history       port.History
 	canvas        *canvas.Canvas
 
 	project domain.Project
-	boxes   []diagram.Box
 
 	menu       *dialog.ContextMenu
 	keyMenu    *dialog.ContextMenu
@@ -87,14 +88,19 @@ type diagramView struct {
 	rowMenu    *dialog.ContextMenu
 	inputTag   struct{}
 
+	// Drag state. dragPos is the in-flight ghost position updated every
+	// pointer.Drag event; on Release it is committed through the port via
+	// UpdatePlacement. Holding the ghost UI-local avoids a Project
+	// allocation per frame during a drag.
 	dragging bool
-	dragIdx  int
+	dragID   domain.EntityID
 	dragOff  f32.Point
+	dragPos  domain.Position
 
 	edit             editTarget
 	editor           widget.Editor
 	keyMenuTarget    editTarget
-	addRowMenuTarget int
+	addRowMenuTarget domain.EntityID
 	rowMenuTarget    editTarget
 
 	hovering bool
@@ -114,13 +120,12 @@ func newDiagramView(de port.DiagramEditor, history port.History) *diagramView {
 			Databases: []domain.Database{
 				{Name: defaultDatabase, Schemas: []domain.Schema{{Name: defaultSchema}}},
 			},
+			Diagram: domain.Diagram{Placements: map[domain.EntityID]domain.Position{}},
 		},
-		menu:             dialog.NewContextMenu("Create Entity"),
-		keyMenu:          dialog.NewContextMenu("PK", "FK", "IK"),
-		addRowMenu:       dialog.NewContextMenu("Add row (a)"),
-		rowMenu:          dialog.NewContextMenu("Add row (a)", "Delete row (d)"),
-		addRowMenuTarget: -1,
-		rowMenuTarget:    editTarget{entityIdx: -1, attrIdx: -1},
+		menu:       dialog.NewContextMenu("Create Entity"),
+		keyMenu:    dialog.NewContextMenu("PK", "FK", "IK"),
+		addRowMenu: dialog.NewContextMenu("Add row (a)"),
+		rowMenu:    dialog.NewContextMenu("Add row (a)", "Delete row (d)"),
 	}
 	v.editor.SingleLine = true
 	v.editor.Submit = true
@@ -149,12 +154,15 @@ func (v *diagramView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensi
 	v.handleEditorEvents(gtx)
 
 	palette := entityPalette(th)
-	for i := range v.entities() {
-		ent := v.entities()[i]
-		box := v.boxes[i]
-		stk := op.Affine(f32.Affine2D{}.Offset(f32.Pt(box.X, box.Y))).Push(gtx.Ops)
+	for _, rec := range domain.EntitiesIn(v.project) {
+		ent := rec.Entity
+		pos, ok := v.entityPosition(ent.ID)
+		if !ok {
+			continue
+		}
+		stk := op.Affine(f32.Affine2D{}.Offset(f32.Pt(pos.X, pos.Y))).Push(gtx.Ops)
 		v.canvas.Entity(gtx, th.Material, palette, ent)
-		if v.edit.kind != editNone && v.edit.entityIdx == i {
+		if v.edit.kind != editNone && v.edit.entityID == ent.ID {
 			v.layoutEditOverlay(gtx, th)
 		}
 		stk.Pop()
@@ -168,16 +176,16 @@ func (v *diagramView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensi
 	}
 	if sel := v.addRowMenu.Layout(gtx, th); sel == 0 {
 		v.addRow(gtx, v.addRowMenuTarget)
-		v.addRowMenuTarget = -1
+		v.addRowMenuTarget = 0
 	}
 	if sel := v.rowMenu.Layout(gtx, th); sel >= 0 {
 		switch sel {
 		case 0:
-			v.addRow(gtx, v.rowMenuTarget.entityIdx)
+			v.addRow(gtx, v.rowMenuTarget.entityID)
 		case 1:
-			v.deleteRow(gtx, v.rowMenuTarget.entityIdx, v.rowMenuTarget.attrIdx)
+			v.deleteRow(gtx, v.rowMenuTarget.entityID, v.rowMenuTarget.attrIdx)
 		}
-		v.rowMenuTarget = editTarget{entityIdx: -1, attrIdx: -1}
+		v.rowMenuTarget = editTarget{}
 	}
 
 	return layout.Dimensions{Size: gtx.Constraints.Max}
@@ -204,8 +212,8 @@ func (v *diagramView) handlePointer(gtx layout.Context) {
 		case pointer.Drag:
 			v.hoverPos = pe.Position
 			v.hovering = true
-			if v.dragging && v.dragIdx >= 0 && v.dragIdx < len(v.boxes) {
-				v.boxes[v.dragIdx].Position = diagram.Position{
+			if v.dragging && v.dragID != 0 {
+				v.dragPos = domain.Position{
 					X: pe.Position.X - v.dragOff.X,
 					Y: pe.Position.Y - v.dragOff.Y,
 				}
@@ -216,9 +224,30 @@ func (v *diagramView) handlePointer(gtx layout.Context) {
 		case pointer.Leave:
 			v.hovering = false
 		case pointer.Release, pointer.Cancel:
-			v.dragging = false
+			v.endDrag(pe.Kind == pointer.Release)
 		}
 	}
+}
+
+// endDrag commits the in-flight drag position through the DiagramEditor on
+// a successful Release; a Cancel discards the drag without touching state.
+func (v *diagramView) endDrag(commit bool) {
+	if !v.dragging {
+		return
+	}
+	id := v.dragID
+	pos := v.dragPos
+	v.dragging = false
+	v.dragID = 0
+	if !commit {
+		return
+	}
+	updated, err := v.diagramEditor.UpdatePlacement(context.TODO(), v.project, id, pos)
+	if err != nil {
+		return
+	}
+	v.project = updated
+	v.history.Push(domain.Command{Kind: domain.CmdMoveEntity, Description: "Move entity"})
 }
 
 func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
@@ -233,15 +262,15 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 		// Right-click is contextual: on a row of an entity it offers
 		// Add row + Delete row; on an entity's header it offers Add row
 		// only; on empty diagram space it offers Create Entity.
-		eIdx, sub, aIdx := v.hitSubArea(gtx, pe.Position)
+		eID, sub, aIdx := v.hitSubArea(gtx, pe.Position)
 		switch {
-		case eIdx < 0:
+		case eID == 0:
 			v.menu.Open(at)
 		case sub == subKeyMarker || sub == subAttrName:
-			v.rowMenuTarget = editTarget{entityIdx: eIdx, attrIdx: aIdx}
+			v.rowMenuTarget = editTarget{entityID: eID, attrIdx: aIdx}
 			v.rowMenu.Open(at)
 		default:
-			v.addRowMenuTarget = eIdx
+			v.addRowMenuTarget = eID
 			v.addRowMenu.Open(at)
 		}
 		return
@@ -274,12 +303,14 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 		return
 	}
 
-	if idx, hit := v.hitEntity(pe.Position); hit {
+	if id, hit := v.hitEntity(gtx, pe.Position); hit {
+		pos, _ := v.project.Diagram.Placements[id]
 		v.dragging = true
-		v.dragIdx = idx
+		v.dragID = id
+		v.dragPos = pos
 		v.dragOff = f32.Point{
-			X: pe.Position.X - v.boxes[idx].X,
-			Y: pe.Position.Y - v.boxes[idx].Y,
+			X: pe.Position.X - pos.X,
+			Y: pe.Position.Y - pos.Y,
 		}
 	}
 }
@@ -313,8 +344,8 @@ func (v *diagramView) handleKeys(gtx layout.Context, allMods key.Modifiers) {
 			// a row to the entity under the cursor. While editing, defer to
 			// the inline editor's text input.
 			if v.edit.kind == editNone && ke.Modifiers == 0 && v.hovering {
-				if idx, hit := v.hitEntity(v.hoverPos); hit {
-					v.addRow(gtx, idx)
+				if id, hit := v.hitEntity(gtx, v.hoverPos); hit {
+					v.addRow(gtx, id)
 				}
 			}
 		case "D":
@@ -322,8 +353,8 @@ func (v *diagramView) handleKeys(gtx layout.Context, allMods key.Modifiers) {
 			// the row under the cursor (only meaningful on a row, not the
 			// header). While editing, defer to the inline editor's text input.
 			if v.edit.kind == editNone && ke.Modifiers == 0 && v.hovering {
-				if eIdx, sub, aIdx := v.hitSubArea(gtx, v.hoverPos); eIdx >= 0 && (sub == subKeyMarker || sub == subAttrName) {
-					v.deleteRow(gtx, eIdx, aIdx)
+				if eID, sub, aIdx := v.hitSubArea(gtx, v.hoverPos); eID != 0 && (sub == subKeyMarker || sub == subAttrName) {
+					v.deleteRow(gtx, eID, aIdx)
 				}
 			}
 		case key.NameEscape:
@@ -358,14 +389,24 @@ func (v *diagramView) handleEditorEvents(gtx layout.Context) {
 }
 
 func (v *diagramView) openSubEditor(gtx layout.Context, at f32.Point) {
-	eIdx, sub, aIdx := v.hitSubArea(gtx, at)
+	eID, sub, aIdx := v.hitSubArea(gtx, at)
+	if eID == 0 {
+		return
+	}
+	ent, _, _, ok := domain.FindEntity(v.project, eID)
+	if !ok {
+		return
+	}
 	switch sub {
 	case subHeader:
-		v.beginTextEdit(editTarget{kind: editHeader, entityIdx: eIdx}, v.entities()[eIdx].Name)
+		v.beginTextEdit(editTarget{kind: editHeader, entityID: eID}, ent.Name)
 	case subAttrName:
-		v.beginTextEdit(editTarget{kind: editAttrName, entityIdx: eIdx, attrIdx: aIdx}, v.entities()[eIdx].Attributes[aIdx].Name)
+		if aIdx < 0 || aIdx >= len(ent.Attributes) {
+			return
+		}
+		v.beginTextEdit(editTarget{kind: editAttrName, entityID: eID, attrIdx: aIdx}, ent.Attributes[aIdx].Name)
 	case subKeyMarker:
-		v.keyMenuTarget = editTarget{entityIdx: eIdx, attrIdx: aIdx}
+		v.keyMenuTarget = editTarget{entityID: eID, attrIdx: aIdx}
 		v.keyMenu.Open(image.Pt(int(at.X), int(at.Y)))
 	}
 }
@@ -382,14 +423,19 @@ func (v *diagramView) commitEdit() {
 	if v.edit.kind == editNone {
 		return
 	}
-	eIdx := v.edit.entityIdx
-	if eIdx < 0 || eIdx >= len(v.entities()) {
+	id := v.edit.entityID
+	if id == 0 {
+		v.edit = editTarget{}
+		return
+	}
+	ent, _, _, ok := domain.FindEntity(v.project, id)
+	if !ok {
 		v.edit = editTarget{}
 		return
 	}
 
 	text := v.editor.Text()
-	ent := v.entities()[eIdx]
+	cmdKind := domain.CmdUpdateEntity
 
 	switch v.edit.kind {
 	case editHeader:
@@ -408,9 +454,10 @@ func (v *diagramView) commitEdit() {
 		return
 	}
 
-	updated, err := v.diagramEditor.UpdateEntity(context.TODO(), v.project, defaultDatabase, defaultSchema, eIdx, ent)
+	updated, err := v.diagramEditor.UpdateEntity(context.TODO(), v.project, id, ent)
 	if err == nil {
 		v.project = updated
+		v.history.Push(domain.Command{Kind: cmdKind, Description: "Edit entity"})
 	}
 	v.edit = editTarget{}
 }
@@ -420,14 +467,16 @@ func (v *diagramView) cancelEdit() {
 }
 
 func (v *diagramView) applyKeyMarker(sel int) {
-	defer func() {
-		v.keyMenuTarget = editTarget{}
-	}()
-	if v.keyMenuTarget.entityIdx < 0 || v.keyMenuTarget.entityIdx >= len(v.entities()) {
+	target := v.keyMenuTarget
+	v.keyMenuTarget = editTarget{}
+	if target.entityID == 0 {
 		return
 	}
-	ent := v.entities()[v.keyMenuTarget.entityIdx]
-	if v.keyMenuTarget.attrIdx < 0 || v.keyMenuTarget.attrIdx >= len(ent.Attributes) {
+	ent, _, _, ok := domain.FindEntity(v.project, target.entityID)
+	if !ok {
+		return
+	}
+	if target.attrIdx < 0 || target.attrIdx >= len(ent.Attributes) {
 		return
 	}
 
@@ -444,82 +493,117 @@ func (v *diagramView) applyKeyMarker(sel int) {
 	}
 
 	attrs := append([]domain.Attribute(nil), ent.Attributes...)
-	attrs[v.keyMenuTarget.attrIdx].KeyKind = kind
+	attrs[target.attrIdx].KeyKind = kind
 	ent.Attributes = attrs
 
-	updated, err := v.diagramEditor.UpdateEntity(context.TODO(), v.project, defaultDatabase, defaultSchema, v.keyMenuTarget.entityIdx, ent)
+	updated, err := v.diagramEditor.UpdateEntity(context.TODO(), v.project, target.entityID, ent)
 	if err == nil {
 		v.project = updated
+		v.history.Push(domain.Command{Kind: domain.CmdUpdateEntity, Description: "Set key marker"})
 	}
 }
 
-func (v *diagramView) entities() []domain.Entity {
-	return v.project.Databases[0].Schemas[0].Entities
+// entityPosition returns the screen-space placement to render and hit-test
+// the entity at. While a drag is in flight the dragged entity's position
+// is the transient ghost (v.dragPos); every other entity reads from
+// project.Diagram.Placements.
+func (v *diagramView) entityPosition(id domain.EntityID) (domain.Position, bool) {
+	if v.dragging && v.dragID == id {
+		return v.dragPos, true
+	}
+	pos, ok := v.project.Diagram.Placements[id]
+	return pos, ok
 }
 
-// hitEntity returns the index of the topmost entity whose placement box
-// contains p, or (-1, false) if none. Iterates in reverse z-order so a
-// later-drawn entity wins over an earlier one when they overlap.
-func (v *diagramView) hitEntity(p f32.Point) (int, bool) {
-	for i := len(v.boxes) - 1; i >= 0; i-- {
-		b := v.boxes[i]
-		if p.X >= b.X && p.X < b.X+b.Width && p.Y >= b.Y && p.Y < b.Y+b.Height {
-			return i, true
+// entityBox materialises an entity's full bounding box from its placement
+// plus its current attribute count. Width is constant; height grows with
+// the number of attribute rows.
+func (v *diagramView) entityBox(gtx layout.Context, ent domain.Entity, pos domain.Position) (left, top, width, height float32) {
+	boxW := float32(gtx.Dp(entityBoxWDp))
+	headerH := float32(gtx.Dp(entityHeaderDp))
+	rowH := float32(gtx.Dp(entityRowDp))
+	return pos.X, pos.Y, boxW, headerH + float32(len(ent.Attributes))*rowH
+}
+
+// hitEntity returns the EntityID of the topmost entity whose bounding box
+// contains p. Iterates entity insertion order in reverse so later-drawn
+// entities win z-order on overlap.
+func (v *diagramView) hitEntity(gtx layout.Context, p f32.Point) (domain.EntityID, bool) {
+	records := domain.EntitiesIn(v.project)
+	for i := len(records) - 1; i >= 0; i-- {
+		ent := records[i].Entity
+		pos, ok := v.entityPosition(ent.ID)
+		if !ok {
+			continue
+		}
+		l, t, w, h := v.entityBox(gtx, ent, pos)
+		if p.X >= l && p.X < l+w && p.Y >= t && p.Y < t+h {
+			return ent.ID, true
 		}
 	}
-	return -1, false
+	return 0, false
 }
 
 // hitSubArea identifies which sub-area of which entity a pointer landed on.
-// Returns subNone for clicks that don't fall on a meaningful editable area.
-func (v *diagramView) hitSubArea(gtx layout.Context, p f32.Point) (entityIdx int, sub entitySub, attrIdx int) {
-	eIdx, ok := v.hitEntity(p)
+// Returns the zero EntityID and subNone for clicks that don't fall on a
+// meaningful editable area.
+func (v *diagramView) hitSubArea(gtx layout.Context, p f32.Point) (id domain.EntityID, sub entitySub, attrIdx int) {
+	eID, ok := v.hitEntity(gtx, p)
 	if !ok {
-		return -1, subNone, -1
+		return 0, subNone, -1
 	}
-	box := v.boxes[eIdx]
-	localX := p.X - box.X
-	localY := p.Y - box.Y
+	ent, _, _, ok := domain.FindEntity(v.project, eID)
+	if !ok {
+		return 0, subNone, -1
+	}
+	pos, ok := v.entityPosition(eID)
+	if !ok {
+		return 0, subNone, -1
+	}
+	localX := p.X - pos.X
+	localY := p.Y - pos.Y
 
 	headerH := float32(gtx.Dp(entityHeaderDp))
 	rowH := float32(gtx.Dp(entityRowDp))
 	keyW := float32(gtx.Dp(entityKeyColDp))
 
 	if localY < headerH {
-		return eIdx, subHeader, -1
+		return eID, subHeader, -1
 	}
 	aIdx := int((localY - headerH) / rowH)
-	attrs := v.entities()[eIdx].Attributes
-	if aIdx < 0 || aIdx >= len(attrs) {
-		return eIdx, subNone, -1
+	if aIdx < 0 || aIdx >= len(ent.Attributes) {
+		return eID, subNone, -1
 	}
 	if localX < keyW {
-		return eIdx, subKeyMarker, aIdx
+		return eID, subKeyMarker, aIdx
 	}
-	return eIdx, subAttrName, aIdx
+	return eID, subAttrName, aIdx
 }
 
 // editingRect returns the screen-space rectangle of the currently active
-// inline editor, or false if no inline edit is open.
+// inline editor, or false if no inline edit is open or the underlying
+// entity / placement is missing.
 func (v *diagramView) editingRect(gtx layout.Context) (image.Rectangle, bool) {
-	if v.edit.kind == editNone {
+	if v.edit.kind == editNone || v.edit.entityID == 0 {
 		return image.Rectangle{}, false
 	}
-	if v.edit.entityIdx < 0 || v.edit.entityIdx >= len(v.boxes) {
+	pos, ok := v.entityPosition(v.edit.entityID)
+	if !ok {
 		return image.Rectangle{}, false
 	}
-	box := v.boxes[v.edit.entityIdx]
 	headerH := gtx.Dp(entityHeaderDp)
 	rowH := gtx.Dp(entityRowDp)
 	boxW := gtx.Dp(entityBoxWDp)
 	keyW := gtx.Dp(entityKeyColDp)
+	x0 := int(pos.X)
+	y0 := int(pos.Y)
 
 	switch v.edit.kind {
 	case editHeader:
-		return image.Rect(int(box.X), int(box.Y), int(box.X)+boxW, int(box.Y)+headerH), true
+		return image.Rect(x0, y0, x0+boxW, y0+headerH), true
 	case editAttrName:
-		y0 := int(box.Y) + headerH + v.edit.attrIdx*rowH
-		return image.Rect(int(box.X)+keyW, y0, int(box.X)+boxW, y0+rowH), true
+		yTop := y0 + headerH + v.edit.attrIdx*rowH
+		return image.Rect(x0+keyW, yTop, x0+boxW, yTop+rowH), true
 	}
 	return image.Rectangle{}, false
 }
@@ -541,36 +625,39 @@ func (v *diagramView) trackPrimaryClick(at f32.Point, now time.Time) bool {
 	return false
 }
 
-// addRow appends a new empty Attribute to the entity at entityIdx via the
-// DiagramEditor port and grows the entity's placement box height to match.
-func (v *diagramView) addRow(gtx layout.Context, entityIdx int) {
-	if entityIdx < 0 || entityIdx >= len(v.entities()) {
+// addRow appends a new empty Attribute to the entity at id via the
+// DiagramEditor port.
+func (v *diagramView) addRow(_ layout.Context, id domain.EntityID) {
+	if id == 0 {
 		return
 	}
-	ent := v.entities()[entityIdx]
+	ent, _, _, ok := domain.FindEntity(v.project, id)
+	if !ok {
+		return
+	}
 	attrs := append([]domain.Attribute(nil), ent.Attributes...)
 	attrs = append(attrs, domain.Attribute{})
 	ent.Attributes = attrs
 
-	updated, err := v.diagramEditor.UpdateEntity(context.TODO(), v.project, defaultDatabase, defaultSchema, entityIdx, ent)
+	updated, err := v.diagramEditor.UpdateEntity(context.TODO(), v.project, id, ent)
 	if err != nil {
 		return
 	}
 	v.project = updated
-
-	rowH := gtx.Dp(entityRowDp)
-	v.boxes[entityIdx].Height += float32(rowH)
 	v.history.Push(domain.Command{Kind: domain.CmdAddAttribute, Description: "Add row"})
 }
 
-// deleteRow removes the Attribute at attrIdx from the entity at entityIdx
-// via the DiagramEditor port and shrinks the entity's placement box height
-// by one row.
-func (v *diagramView) deleteRow(gtx layout.Context, entityIdx, attrIdx int) {
-	if entityIdx < 0 || entityIdx >= len(v.entities()) {
+// deleteRow removes the Attribute at attrIdx from the entity at id via the
+// DiagramEditor port. If the inline editor is open on the row being
+// removed, the edit state is cleared first.
+func (v *diagramView) deleteRow(_ layout.Context, id domain.EntityID, attrIdx int) {
+	if id == 0 {
 		return
 	}
-	ent := v.entities()[entityIdx]
+	ent, _, _, ok := domain.FindEntity(v.project, id)
+	if !ok {
+		return
+	}
 	if attrIdx < 0 || attrIdx >= len(ent.Attributes) {
 		return
 	}
@@ -578,46 +665,33 @@ func (v *diagramView) deleteRow(gtx layout.Context, entityIdx, attrIdx int) {
 	attrs = append(attrs[:attrIdx], attrs[attrIdx+1:]...)
 	ent.Attributes = attrs
 
-	// If the inline editor is open on the row being removed, drop the edit
-	// so the next frame doesn't try to render an overlay at a stale index.
-	if v.edit.kind == editAttrName && v.edit.entityIdx == entityIdx && v.edit.attrIdx == attrIdx {
+	if v.edit.kind == editAttrName && v.edit.entityID == id && v.edit.attrIdx == attrIdx {
 		v.edit = editTarget{}
 	}
 
-	updated, err := v.diagramEditor.UpdateEntity(context.TODO(), v.project, defaultDatabase, defaultSchema, entityIdx, ent)
+	updated, err := v.diagramEditor.UpdateEntity(context.TODO(), v.project, id, ent)
 	if err != nil {
 		return
 	}
 	v.project = updated
-
-	rowH := gtx.Dp(entityRowDp)
-	v.boxes[entityIdx].Height -= float32(rowH)
-	if v.boxes[entityIdx].Height < 0 {
-		v.boxes[entityIdx].Height = 0
-	}
 	v.history.Push(domain.Command{Kind: domain.CmdRemoveAttribute, Description: "Delete row"})
 }
 
-func (v *diagramView) createEntity(gtx layout.Context, at image.Point) {
+func (v *diagramView) createEntity(_ layout.Context, at image.Point) {
 	entity := domain.Entity{
 		Name:       entityNamePlaceholder,
 		Attributes: []domain.Attribute{{}},
 	}
-	updated, err := v.diagramEditor.AddEntity(context.TODO(), v.project, defaultDatabase, defaultSchema, entity)
+	updated, id, err := v.diagramEditor.AddEntity(context.TODO(), v.project, defaultDatabase, defaultSchema, entity)
 	if err != nil {
 		return
 	}
 	v.project = updated
 
-	boxW := gtx.Dp(entityBoxWDp)
-	headerH := gtx.Dp(entityHeaderDp)
-	rowH := gtx.Dp(entityRowDp)
-	boxH := headerH + len(entity.Attributes)*rowH
-	v.boxes = append(v.boxes, diagram.Box{
-		Position: diagram.Position{X: float32(at.X), Y: float32(at.Y)},
-		Width:    float32(boxW),
-		Height:   float32(boxH),
-	})
+	placed, err := v.diagramEditor.UpdatePlacement(context.TODO(), v.project, id, domain.Position{X: float32(at.X), Y: float32(at.Y)})
+	if err == nil {
+		v.project = placed
+	}
 
 	v.history.Push(domain.Command{Kind: domain.CmdAddEntity, Description: "Add entity"})
 }

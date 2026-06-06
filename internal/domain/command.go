@@ -6,10 +6,13 @@ type CommandKind int
 const (
 	CmdAddEntity CommandKind = iota
 	CmdRemoveEntity
+	CmdUpdateEntity
+	CmdMoveEntity
 	CmdAddAttribute
 	CmdRemoveAttribute
 	CmdAddRelationship
 	CmdRemoveRelationship
+	CmdUpdateRelationship
 )
 
 // Command is a unit of work on the History stack. Per-mode scoping of the
