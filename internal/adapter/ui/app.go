@@ -14,6 +14,7 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 
+	"github.com/rpatton4/electrorangerd/internal/adapter/ui/dialog"
 	"github.com/rpatton4/electrorangerd/internal/adapter/ui/infomenu"
 	"github.com/rpatton4/electrorangerd/internal/adapter/ui/panel"
 	"github.com/rpatton4/electrorangerd/internal/adapter/ui/theme"
@@ -23,6 +24,11 @@ import (
 // appName is the base OS window title. The window title also carries a
 // mode suffix while the user is on the mode shell — see App.windowTitle.
 const appName = "ElectroRangerD"
+
+// noticeMazeMessage is shown when the user picks a not-yet-built mode
+// (Forward / Dictionary / Reverse) on the wheel. Diagram is the only
+// sector with real behaviour today.
+const noticeMazeMessage = "This is part of a maze of twisty little passages, all alike. A skeleton, probably the remains of a luckless designer, lies here."
 
 // screenType distinguishes the top-level UI surfaces inside the app shell.
 // The master-password gate runs unconditionally before either screen — it
@@ -81,6 +87,10 @@ type App struct {
 
 	// Peek panel — same UI element regardless of which mode is active.
 	peek *panel.Peek
+
+	// notice is a centred dismissable dialog used to stub out the three
+	// not-yet-built modes (Forward / Dictionary / Reverse) on the wheel.
+	notice *dialog.Notice
 }
 
 // NewApp constructs the App with all required port dependencies and a freshly
@@ -194,6 +204,8 @@ func (a *App) frame(gtx layout.Context) {
 		)
 		a.infoMenu.LayoutOverlay(gtx)
 	}
+
+	a.notice.Layout(gtx, a.theme)
 }
 
 // initViews builds the password gate, the welcome chooser, and the four
@@ -201,9 +213,16 @@ func (a *App) frame(gtx layout.Context) {
 // a.password serves as the "first frame" sentinel.
 func (a *App) initViews() {
 	a.password = newPasswordView(a.vault, a.log)
+	a.notice = dialog.NewNotice()
+	a.notice.Image = decodeErdLost(a.log)
+	a.notice.ImageScale = 0.3
 	a.infoMenu = infomenu.New(a.log, func(s infomenu.Sector) {
-		a.mode = sectorToMode(s)
-		a.screen = screenMode
+		if s == infomenu.SectorDiagram {
+			a.mode = sectorToMode(s)
+			a.screen = screenMode
+			return
+		}
+		a.notice.Open(noticeMazeMessage)
 	})
 	a.welcomeView = newWelcomeView(a.infoMenu)
 	a.diagramView = newDiagramView(a.diagramEditor, a.diagramHistory)
