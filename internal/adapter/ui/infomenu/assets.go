@@ -18,6 +18,18 @@ var navButtonPNG []byte
 //go:embed menu_button.png
 var menuButtonPNG []byte
 
+//go:embed menu_button_diagram.png
+var menuButtonDiagramPNG []byte
+
+//go:embed menu_button_forward.png
+var menuButtonForwardPNG []byte
+
+//go:embed menu_button_dictionary.png
+var menuButtonDictionaryPNG []byte
+
+//go:embed menu_button_reverse.png
+var menuButtonReversePNG []byte
+
 // decodeNavButton decodes the embedded chrome PNG used as the small
 // circular nav button. Returns a zero-value op on failure (paints
 // nothing) and logs the error.
@@ -36,9 +48,30 @@ func decodeNavButton(log *slog.Logger) paint.ImageOp {
 // clip — Gemini-generated PNGs have opaque grey corners, this masks
 // them out at decode time.
 func decodeMenuButton(log *slog.Logger) paint.ImageOp {
-	src, _, err := image.Decode(bytes.NewReader(menuButtonPNG))
+	return decodeMaskedPNG(log, menuButtonPNG, "menu button")
+}
+
+// decodeHighlightImages decodes the four per-sector highlight PNGs and
+// returns them keyed by Sector. Each is masked with the same inscribed
+// circle as the base wheel so renderers can swap between them without
+// any per-image clip setup. A failed decode logs and leaves that
+// sector's entry zero — renderWheel treats a zero ImageOp as "fall
+// back to the base wheel".
+func decodeHighlightImages(log *slog.Logger) map[Sector]paint.ImageOp {
+	return map[Sector]paint.ImageOp{
+		SectorDiagram:    decodeMaskedPNG(log, menuButtonDiagramPNG, "menu button diagram"),
+		SectorForward:    decodeMaskedPNG(log, menuButtonForwardPNG, "menu button forward"),
+		SectorDictionary: decodeMaskedPNG(log, menuButtonDictionaryPNG, "menu button dictionary"),
+		SectorReverse:    decodeMaskedPNG(log, menuButtonReversePNG, "menu button reverse"),
+	}
+}
+
+// decodeMaskedPNG decodes a single embedded PNG and applies the
+// inscribed-circle alpha mask. Returns a zero ImageOp on failure.
+func decodeMaskedPNG(log *slog.Logger, data []byte, label string) paint.ImageOp {
+	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		log.Error("decode menu button", "err", err)
+		log.Error("decode "+label, "err", err)
 		return paint.ImageOp{}
 	}
 	return paint.NewImageOp(ApplyCircleMask(src))

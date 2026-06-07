@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"gioui.org/f32"
+	"gioui.org/io/event"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -80,20 +82,28 @@ type InfoMenu struct {
 	menuClick  widget.Clickable
 	scrimClick widget.Clickable
 
-	navImage  paint.ImageOp
-	menuImage paint.ImageOp
+	// Hover state for the wheel: hoveredSector is meaningful only when
+	// hovering is true. The renderer swaps menuImage for the matching
+	// entry in highlightImages while the hover is active.
+	wheelHoverTag struct{}
+	hoveredSector Sector
+	hovering      bool
+
+	navImage        paint.ImageOp
+	menuImage       paint.ImageOp
+	highlightImages map[Sector]paint.ImageOp
 }
 
 // New builds an InfoMenu with the embedded chrome assets decoded
 // ready for paint. onSelect is invoked when the user taps one of the
-// four ring sectors on the menu wheel; pass nil to ignore sector
-// taps.
+// four ring sectors on the menu wheel; pass nil to ignore sector taps.
 func New(log *slog.Logger, onSelect func(Sector)) *InfoMenu {
 	return &InfoMenu{
-		log:       log,
-		onSelect:  onSelect,
-		navImage:  decodeNavButton(log),
-		menuImage: decodeMenuButton(log),
+		log:             log,
+		onSelect:        onSelect,
+		navImage:        decodeNavButton(log),
+		menuImage:       decodeMenuButton(log),
+		highlightImages: decodeHighlightImages(log),
 	}
 }
 
@@ -279,9 +289,25 @@ func (m *InfoMenu) animationProgress(gtx layout.Context, startedAt time.Time) fl
 // the supplied animation progress applied as a scale+rotate affine
 // around the wheel's centre. Caller controls outer positioning
 // (e.g. via layout.Center) and any input-clip wrapping.
+//
+// Hover handling lives here too: the wheel registers a pointer
+// hover area in the static (un-animated) wheel coords, resolves the
+// pointer to a sector via the same maths the click handler uses,
+// and swaps the painted source to the matching per-sector highlight
+// image once the open animation has settled.
 func (m *InfoMenu) renderWheel(gtx layout.Context, sz int, progress float32) layout.Dimensions {
 	size := image.Pt(sz, sz)
 	gtx.Constraints = layout.Exact(size)
+
+	event.Op(gtx.Ops, &m.wheelHoverTag)
+	m.handleWheelPointer(gtx, sz)
+
+	src := m.menuImage
+	if m.hovering && progress >= 1 {
+		if hi, ok := m.highlightImages[m.hoveredSector]; ok && hi != (paint.ImageOp{}) {
+			src = hi
+		}
+	}
 
 	scale := 0.125 + 0.875*progress
 	rotation := progress * 2 * float32(math.Pi)
@@ -289,13 +315,47 @@ func (m *InfoMenu) renderWheel(gtx layout.Context, sz int, progress float32) lay
 	affine := f32.Affine2D{}.
 		Rotate(centre, rotation).
 		Scale(centre, f32.Pt(scale, scale))
-	defer op.Affine(affine).Push(gtx.Ops).Pop()
-
-	return widget.Image{
-		Src:      m.menuImage,
+	aff := op.Affine(affine).Push(gtx.Ops)
+	dims := widget.Image{
+		Src:      src,
 		Fit:      widget.Cover,
 		Position: layout.Center,
 	}.Layout(gtx)
+	aff.Pop()
+
+	return dims
+}
+
+// handleWheelPointer drains pointer Enter/Leave/Move events on the
+// wheel's static hit area and updates hovering / hoveredSector
+// accordingly. Press / Release events are NOT consumed here — the
+// widget.Clickable that wraps the wheel keeps owning those so sector
+// taps still fire onSelect.
+func (m *InfoMenu) handleWheelPointer(gtx layout.Context, sz int) {
+	for {
+		ev, ok := gtx.Event(pointer.Filter{
+			Target: &m.wheelHoverTag,
+			Kinds:  pointer.Enter | pointer.Leave | pointer.Move,
+		})
+		if !ok {
+			break
+		}
+		pe, ok := ev.(pointer.Event)
+		if !ok {
+			continue
+		}
+		switch pe.Kind {
+		case pointer.Enter, pointer.Move:
+			if sector, ok := resolveSector(int(pe.Position.X), int(pe.Position.Y), sz); ok {
+				m.hoveredSector = sector
+				m.hovering = true
+			} else {
+				m.hovering = false
+			}
+		case pointer.Leave:
+			m.hovering = false
+		}
+	}
 }
 
 // LayoutOverlay paints the dim scrim and the animated info menu
