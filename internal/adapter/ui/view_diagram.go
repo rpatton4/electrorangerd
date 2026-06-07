@@ -259,7 +259,7 @@ func (v *diagramView) Layout(gtx layout.Context, th *theme.Theme) layout.Dimensi
 
 func (v *diagramView) handlePointer(gtx layout.Context) {
 	for {
-		ev, ok := gtx.Source.Event(pointer.Filter{
+		ev, ok := gtx.Event(pointer.Filter{
 			Target: &v.inputTag,
 			Kinds:  pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel | pointer.Move | pointer.Enter | pointer.Leave,
 		})
@@ -417,7 +417,7 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 	if id, hit := v.hitEntity(gtx, pe.Position); hit {
 		v.selected = id
 		v.selectedRel = 0
-		pos, _ := v.project.Diagram.Placements[id]
+		pos := v.project.Diagram.Placements[id]
 		v.dragging = true
 		v.dragID = id
 		v.dragPos = pos
@@ -436,7 +436,7 @@ func (v *diagramView) onPress(gtx layout.Context, pe pointer.Event) {
 
 func (v *diagramView) handleKeys(gtx layout.Context, allMods key.Modifiers) {
 	for {
-		ev, ok := gtx.Source.Event(
+		ev, ok := gtx.Event(
 			key.Filter{Name: "C", Optional: allMods},
 			key.Filter{Name: "A", Optional: allMods},
 			key.Filter{Name: "D", Optional: allMods},
@@ -856,32 +856,6 @@ func (v *diagramView) hitHandle(gtx layout.Context, p f32.Point) (id domain.Enti
 		}
 	}
 	return 0, -1, false
-}
-
-// nearestHandle returns the handle index on the given entity whose centre
-// is closest to p.
-func (v *diagramView) nearestHandle(gtx layout.Context, id domain.EntityID, p f32.Point) int {
-	ent, _, _, ok := domain.FindEntity(v.project, id)
-	if !ok {
-		return -1
-	}
-	pos, ok := v.entityPosition(id)
-	if !ok {
-		return -1
-	}
-	best := 0
-	var bestD2 float32 = 1e18
-	for h := 0; h < canvas.HandleCount; h++ {
-		hx, hy := canvas.HandlePosition(gtx, ent, h)
-		dx := p.X - (pos.X + hx)
-		dy := p.Y - (pos.Y + hy)
-		d2 := dx*dx + dy*dy
-		if d2 < bestD2 {
-			bestD2 = d2
-			best = h
-		}
-	}
-	return best
 }
 
 // nearestHandlePair returns the (from, to) handle indices on the two

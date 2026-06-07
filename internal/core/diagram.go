@@ -17,8 +17,8 @@ import (
 // are primed on first use to one past the highest existing ID so projects
 // loaded with pre-existing IDs do not collide with newly-assigned ones.
 type diagramEditorService struct {
-	log               *slog.Logger
-	nextEntityID      domain.EntityID
+	log                *slog.Logger
+	nextEntityID       domain.EntityID
 	nextRelationshipID domain.RelationshipID
 }
 
